@@ -1,0 +1,32 @@
+CALCULO TABLAS REPARTO V17.14 - MANIFIESTO
+
+Version visible:
+V17.14 - Sincronizacion exclusiva de paises Caja 400
+
+Correccion principal:
+TipoCajaPais se sustituye por la seleccion completa de paises Caja 400. Todo
+pais no seleccionado se elimina de Configuracion.xlsx y reparto.db.
+
+Archivos funcionales modificados:
+- modulos/gestor_tipo_caja_pais.py
+- modulos/formulario_calculo_cajas_pedido.py
+- modulos/version_aplicacion.py
+- compilar_calculo_tablas_reparto.bat
+
+Pruebas nuevas o actualizadas:
+- tests/test_gestor_tipo_caja_pais_v17_14.py
+- tests/test_calculador_cajas_paises_v17_14.py
+- tests/test_formulario_cajas_tipo_caja_pais_v17_14.py
+
+Ejecucion directa:
+PROBAR_V17_14_DESDE_PYTHON.bat
+
+Pruebas:
+EJECUTAR_PRUEBAS_V17_14.bat
+
+Compilacion:
+compilar_calculo_tablas_reparto.bat
+
+Los archivos reparto.db y datos_iniciales/Configuracion.xlsx permanecen sin
+cambios respecto a V17.13. La eliminacion se ejecuta solo cuando el operador
+confirma la sincronizacion desde el formulario.

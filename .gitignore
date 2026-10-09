@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Compilación
+build/
+dist/
+
+# Base de datos
+reparto.db
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# VS Code
+.vscode/

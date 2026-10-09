@@ -1,0 +1,48 @@
+CALCULO TABLAS REPARTO V17.14
+==============================
+
+INSTALACION RECOMENDADA
+-----------------------
+1. Haz una copia de seguridad de tu carpeta actual, especialmente:
+   - reparto.db
+   - datos_iniciales\Configuracion.xlsx
+2. Extrae este proyecto en:
+   C:\Trabajos\Calculo_Tablas_Reparto
+3. Ejecuta:
+   PROBAR_V17_14_DESDE_PYTHON.bat
+4. Comprueba que la ventana principal muestre:
+   V17.14 - Sincronizacion exclusiva de paises Caja 400
+5. Cuando la prueba sea correcta, ejecuta:
+   compilar_calculo_tablas_reparto.bat
+
+CORRECCION V17.14
+-----------------
+En Calculo de cajas para pedido, dentro de Volumetria y optimizacion de
+reutilizacion por pais, el boton CARGAR PAISES 400 EN MAESTRO ahora realiza
+una sincronizacion completa:
+
+- El maestro final contiene exclusivamente los paises marcados como Caja 400.
+- Los paises marcados como Caja 300 se eliminan de TipoCajaPais.
+- Tambien se elimina cualquier pais antiguo que exista en el maestro pero no
+  forme parte de la seleccion actual de Caja 400.
+- Si no se selecciona ningun pais como Caja 400 y se confirma la operacion,
+  TipoCajaPais queda vacio.
+- La eliminacion se aplica tanto en Configuracion.xlsx como en reparto.db.
+- Antes de escribir se muestra la lista de paises que se eliminaran y se pide
+  confirmacion.
+- Se crea una copia de seguridad antes de modificar los maestros.
+
+REGLAS QUE SE MANTIENEN
+-----------------------
+- Nueva se convierte en 4_Nueva_40.
+- Reutilizada/Usada se convierte en 3_Usada_40.
+- No se admiten paises mixtos. Si un pais contiene ambas familias, la
+  operacion completa se bloquea sin modificar Excel ni SQLite.
+- Los conflictos de tipo de un pais seleccionado se preguntan individualmente.
+- Los paises se muestran por numero de Cajas 400 de mayor a menor.
+
+PRUEBAS
+-------
+Ejecuta EJECUTAR_PRUEBAS_V17_14.bat para lanzar las 18 pruebas automaticas.
+El resultado de la validacion realizada antes de empaquetar esta incluido en:
+VALIDACION_V17_14.txt

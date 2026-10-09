@@ -1,0 +1,113 @@
+DOCUMENTO HISTORICO DE V17.13
+NOTA: la regla de conservar paises no seleccionados fue sustituida en V17.14.
+En V17.14, todo pais no seleccionado como Caja 400 se elimina.
+
+CALCULO TABLAS REPARTO - V17.13
+Fecha: 01/10/2026
+
+CAMBIOS SOLICITADOS
+===================
+En el formulario CALCULO DE CAJAS PARA PEDIDO, apartado:
+
+2. VOLUMETRIA Y OPTIMIZACION DE REUTILIZACION POR PAIS
+
+se incorporan los siguientes cambios:
+
+1. ORDEN DE LOS PAISES
+----------------------
+- Los paises se muestran por Cajas 400 de mayor a menor.
+- En caso de empate se ordenan por Volumen m3 de mayor a menor.
+- Si tambien empatan, se ordenan alfabeticamente por pais.
+- La seleccion automatica deja de depender del numero de fila y se identifica
+  por el nombre normalizado del pais. Reordenar la tabla no cambia la seleccion.
+
+2. TIPO 400 A GUARDAR
+---------------------
+Se anade la columna TIPO 400 A GUARDAR. La aplicacion reproduce la conversion
+inicial de TipoCaja:
+
+- TipoCajaInicial NUEVA, homologado a 1_Nueva_30 -> 4_Nueva_40.
+- TipoCajaInicial REUTILIZADA/USADA, homologado a 2_Reutilizada_30 o
+  3_Usada_40 -> 3_Usada_40.
+
+El diagnostico utiliza TipoCajaInicial por tienda y la homologacion de
+TiposDeCaja. No utiliza TipoCajaPais para evitar una conversion circular.
+
+3. PROHIBICION DE PAISES MIXTOS
+-------------------------------
+- Un pais debe resolver a una unica familia: NUEVA o USADA/REUTILIZADA.
+- Si aparecen ambas familias, se muestra ERROR: NUEVA Y USADA.
+- Un pais mixto bloquea toda la operacion de guardado.
+- Tampoco se guardan paises sin informacion o con tipos no homologados.
+- Ante un error no se modifica Configuracion.xlsx ni reparto.db.
+
+4. NUEVO BOTON
+--------------
+Se anade el boton:
+
+CARGAR PAISES 400 EN MAESTRO
+
+El boton recoge solo los paises marcados en la columna Caja 400 y prepara su
+alta o actualizacion en el maestro TipoCajaPais.
+
+5. PROTECCION DE DATOS EXISTENTES
+---------------------------------
+- Un pais nuevo se anade.
+- Un pais que ya tiene el mismo valor queda sin cambios.
+- Un pais con un valor diferente no se sobrescribe silenciosamente.
+- Para cada conflicto se pregunta:
+  SI = sustituir por el valor calculado.
+  NO = conservar el valor actual.
+  CANCELAR = cancelar toda la operacion.
+- Los paises no seleccionados nunca se borran del maestro.
+
+6. GUARDADO EXCEL + SQLITE
+--------------------------
+- Se actualiza la hoja TipoCajaPais de datos_iniciales/Configuracion.xlsx.
+- Se actualiza la tabla TipoCajaPais de reparto.db.
+- Antes de escribir se crea un backup con fecha y hora.
+- El Excel se genera primero en un fichero temporal.
+- SQLite se actualiza dentro de una transaccion.
+- Si falla la escritura, se ejecuta rollback y se restaura el Excel desde el
+  backup cuando sea necesario.
+- Si Configuracion.xlsx esta abierto, se informa al operador y no se completa
+  la actualizacion.
+
+ARCHIVOS PRINCIPALES MODIFICADOS
+================================
+- modulos/formulario_calculo_cajas_pedido.py
+- modulos/calculador_cajas_paises.py
+- modulos/version_aplicacion.py
+- Calculo_Tablas_Reparto.spec
+- compilar_calculo_tablas_reparto.bat
+
+ARCHIVO NUEVO
+=============
+- modulos/gestor_tipo_caja_pais.py
+
+PRUEBAS
+=======
+Se mantienen las 7 pruebas de V17.12 y se anaden 7 pruebas de V17.13:
+- Orden por Cajas 400, volumen y pais.
+- Seleccion automatica por nombre de pais y no por indice.
+- Conversion Nueva -> 4_Nueva_40 y Reutilizada/Usada -> 3_Usada_40.
+- Bloqueo de pais mixto.
+- Clasificacion de altas y conflictos.
+- Guardado sincronizado en Excel y SQLite, conservando paises no seleccionados.
+- Ausencia de backup cuando no existe ningun cambio real.
+
+La bateria completa contiene 14 pruebas y debe finalizar sin errores.
+
+COMPILACION
+===========
+Colocar el proyecto en:
+
+C:\Trabajos\Calculo_Tablas_Reparto
+
+y ejecutar primero:
+
+PROBAR_V17_13_DESDE_PYTHON.bat
+
+Despues compilar con:
+
+compilar_calculo_tablas_reparto.bat

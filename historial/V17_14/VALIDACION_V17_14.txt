@@ -1,0 +1,47 @@
+CALCULO TABLAS REPARTO V17.14 - VALIDACION
+Fecha: 01/10/2026
+
+1. COMPILACION SINTACTICA
+------------------------
+Se compilaron todos los modulos Python del proyecto sin errores.
+
+2. PRUEBAS AUTOMATICAS
+----------------------
+Resultado: 18 pruebas ejecutadas, 18 correctas, 0 errores, 0 fallos.
+
+Cobertura relevante:
+- Orden de paises por Cajas 400 descendente.
+- Seleccion estable por nombre de pais.
+- Conversion Nueva -> 4_Nueva_40.
+- Conversion Reutilizada/Usada -> 3_Usada_40.
+- Bloqueo de pais mixto.
+- Codigos Evacuar y No_Evacuar independientes.
+- Eliminacion de paises no seleccionados.
+- Vaciado total de TipoCajaPais con seleccion vacia.
+- Sincronizacion exacta de Configuracion.xlsx y reparto.db.
+- Correccion de una discrepancia previa en SQLite.
+- Integracion del formulario con el guardado exclusivo.
+
+3. VALIDACION CON LOS DATOS REALES INCLUIDOS
+--------------------------------------------
+Estado inicial de TipoCajaPais:
+- ALEMANIA -> 4_Nueva_40
+- ITALIA -> 3_Usada_40
+- TURQUIA -> 4_Nueva_40
+
+Prueba ejecutada sobre copias de reparto.db y Configuracion.xlsx:
+- Seleccion Caja 400: ITALIA y TURQUIA.
+- Pais no seleccionado: ALEMANIA.
+- Resultado esperado: ALEMANIA eliminada.
+- Resultado obtenido en SQLite:
+  ITALIA -> 3_Usada_40
+  TURQUIA -> 4_Nueva_40
+- Resultado obtenido en Excel: identico a SQLite.
+
+Resultado final: VALIDACION_REAL_OK.
+
+4. INTEGRIDAD DE LOS ARCHIVOS ORIGINALES
+----------------------------------------
+La validacion se realizo sobre copias temporales. Los archivos reparto.db y
+Configuracion.xlsx incluidos en el proyecto no fueron modificados durante las
+pruebas.

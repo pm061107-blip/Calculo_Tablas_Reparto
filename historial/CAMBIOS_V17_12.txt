@@ -1,0 +1,57 @@
+CALCULO TABLAS REPARTO - V17.12
+Fecha: 01/10/2026
+
+CAMBIO SOLICITADO
+=================
+En el formulario CALCULO ADELANTO (subpedido + pedido completo), al generar
+GRTDASWP.txt ahora se solicitan dos codigos independientes:
+
+1. Codigo Evacuar
+   Se escribe en la primera columna de las lineas del bloque:
+   Reparto_AAAAMMDD_Evacuar
+
+2. Codigo No_Evacuar
+   Se escribe en la primera columna de las lineas del bloque:
+   Reparto_AAAAMMDD_No_Evacuar
+
+COMPORTAMIENTO
+==============
+- Los dos codigos son obligatorios.
+- Si se cancela cualquiera de las preguntas, no se generan las tablas ni el TXT.
+- El mensaje final muestra el codigo aplicado a cada bloque.
+- El TXT conserva siete columnas, tabuladores, codificacion cp1252 y finales de
+  linea CRLF.
+- Se conserva compatibilidad interna con llamadas antiguas: si un proceso no
+  facilita codigo No_Evacuar, el exportador reutiliza el codigo Evacuar.
+
+ARCHIVOS MODIFICADOS
+====================
+- modulos/formulario_calculo_adelanto.py
+- modulos/exportar_grtdaswp_adelanto.py
+- modulos/version_aplicacion.py
+- compilar_calculo_tablas_reparto.bat
+
+VALIDACION
+==========
+Se han incorporado y ejecutado 7 pruebas automaticas:
+- Codigos independientes en cada bloque.
+- Formato y contenido de GRTDASWP.txt.
+- Compatibilidad con el codigo unico anterior.
+- Rechazo de tiendas solapadas.
+- Rechazo de codigo No_Evacuar vacio.
+- Envio correcto de ambos codigos desde el formulario.
+- Cancelacion del segundo codigo sin exportar archivos.
+
+Resultado: 7 pruebas correctas.
+
+NOTA DE COMPILACION
+===================
+Las carpetas build y dist de la entrega original pertenecian a V17.11 y no se
+incluyen en este paquete para evitar ejecutar por error un EXE antiguo. Para
+obtener el EXE V17.12, colocar el proyecto en:
+
+C:\Trabajos\Calculo_Tablas_Reparto
+
+y ejecutar:
+
+compilar_calculo_tablas_reparto.bat

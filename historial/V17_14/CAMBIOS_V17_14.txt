@@ -1,0 +1,62 @@
+CALCULO TABLAS REPARTO - V17.14
+Fecha: 01/10/2026
+
+OBJETIVO
+========
+Corregir el comportamiento del boton CARGAR PAISES 400 EN MAESTRO para que
+TipoCajaPais sea una fotografia exacta de la seleccion actual de Caja 400.
+
+COMPORTAMIENTO DEFINITIVO
+=========================
+1. Se recogen todos los paises marcados como Caja 400.
+2. Se determina su tipo mediante TipoCajaInicial + TiposDeCaja:
+   - NUEVA -> 4_Nueva_40
+   - REUTILIZADA/USADA -> 3_Usada_40
+3. Se bloquea la operacion si algun pais seleccionado es mixto, carece de
+   informacion o contiene tipos sin homologar.
+4. El maestro final se sustituye completamente por los paises seleccionados.
+5. Todo pais que no este seleccionado como Caja 400 se elimina:
+   - Paises marcados como Caja 300.
+   - Paises antiguos que sigan en TipoCajaPais pero no aparezcan en la
+     seleccion actual.
+6. Si la seleccion Caja 400 esta vacia, se permite confirmar el vaciado total
+   del maestro.
+7. Configuracion.xlsx y reparto.db quedan con exactamente las mismas filas.
+
+SEGURIDAD Y CONFIRMACION
+=======================
+- La vista previa indica cuantos paises quedaran y cuantos se eliminaran.
+- Se muestra el detalle de los paises que van a desaparecer del maestro.
+- Se crea un backup de Configuracion.xlsx con fecha y hora.
+- El Excel se prepara en un archivo temporal.
+- SQLite se modifica dentro de una transaccion.
+- Antes del commit se verifica que Excel y SQLite coincidan con el objetivo.
+- Si falla cualquier paso, SQLite hace rollback y se restaura el Excel.
+- Si el Excel esta abierto, la operacion se cancela con un mensaje claro.
+
+CAMBIOS DE INTERFAZ
+===================
+- El boton permanece habilitado despues de CALCULAR PAISES incluso cuando no
+  haya ningun pais marcado como Caja 400, para permitir vaciar el maestro de
+  forma explicita.
+- La confirmacion utiliza el titulo Sincronizar TipoCajaPais.
+- El mensaje final informa de altas, modificaciones, eliminaciones, registros
+  sin cambios y total final del maestro.
+
+ARCHIVOS PRINCIPALES MODIFICADOS
+================================
+- modulos/formulario_calculo_cajas_pedido.py
+- modulos/gestor_tipo_caja_pais.py
+- modulos/version_aplicacion.py
+- compilar_calculo_tablas_reparto.bat
+
+PRUEBAS V17.14
+==============
+La bateria completa contiene 18 pruebas automaticas. Se anaden verificaciones
+especificas para:
+- Eliminacion de paises no seleccionados en Excel y SQLite.
+- Vaciado total del maestro cuando no hay paises Caja 400.
+- Deteccion previa de los paises a eliminar.
+- Resincronizacion de SQLite aunque el Excel ya coincida.
+- Envio desde el formulario de solo los paises Caja 400.
+- Envio de un objetivo vacio desde el formulario cuando todos son Caja 300.

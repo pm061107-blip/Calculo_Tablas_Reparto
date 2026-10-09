@@ -1,0 +1,46 @@
+CALCULO TABLAS REPARTO V17.15 - CAMBIOS
+Fecha: 01/10/2026
+
+CORRECCION PRINCIPAL
+--------------------
+Se corrige y se hace explicita la correspondencia de grupos en Calculo Adelanto:
+
+- Tiendas seleccionadas en SUBPEDIDO:
+  grupo No_Evacuar y codigo No_Evacuar.
+
+- Tiendas seleccionadas en PEDIDO COMPLETO MENOS SUBPEDIDO:
+  grupo Evacuar y codigo Evacuar.
+
+CAMBIOS EN EL FORMULARIO
+------------------------
+1. El primer bloque aparece como:
+   "Subpedido / adelanto - NO EVACUAR".
+
+2. El segundo bloque aparece como:
+   "Pedido completo menos adelanto - EVACUAR".
+
+3. Las preguntas se realizan en el mismo orden que los bloques:
+   - Primero: codigo No_Evacuar del SUBPEDIDO.
+   - Segundo: codigo Evacuar del PEDIDO COMPLETO.
+
+4. Cada pregunta explica expresamente a que tiendas y grupo pertenece el codigo.
+
+5. El resumen final confirma:
+   - SUBPEDIDO -> No_Evacuar.
+   - PEDIDO COMPLETO MENOS SUBPEDIDO -> Evacuar.
+
+CAMBIOS EN EL EXPORTADOR GRTDASWP
+---------------------------------
+- Se sustituyen las llamadas nuevas con el parametro ambiguo `codigo` por los
+  parametros explicitos `codigo_no_evacuar` y `codigo_evacuar`.
+- El bloque Reparto_AAAAMMDD_No_Evacuar se construye exclusivamente con las
+  tiendas finales del subpedido.
+- El bloque Reparto_AAAAMMDD_Evacuar se construye exclusivamente con las
+  tiendas finales del pedido completo menos subpedido.
+- Se conserva compatibilidad con llamadas antiguas que utilicen un unico
+  parametro `codigo`.
+- Se mantiene el bloqueo si una tienda aparece en ambos grupos.
+
+VERSION
+-------
+V17.15 - Subpedido No_Evacuar y pedido completo Evacuar
