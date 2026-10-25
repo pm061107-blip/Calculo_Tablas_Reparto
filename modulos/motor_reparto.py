@@ -1,6 +1,7 @@
 from bd.basedatos import BaseDatos
 from modulos.dialogos_operador import seleccionar_opcion_lado_corto
 from modulos.gestor_pedidos_trabajo import GestorPedidosTrabajo
+from modulos.repeticion_tiendas import expandir_filas, normalizar_repeticiones
 
 
 class MotorReparto:
@@ -38,6 +39,12 @@ class MotorReparto:
         self.opcion_lado_corto = None
         self.opciones_lado_corto = []
 
+        # V2.5: Tienda+Aparte repetidas en varios destinos del mismo CLA.
+        self.repeticiones = {}
+        self.cla_repeticion = {}
+        self.lineas_sin_repeticiones = 0
+        self.pedido_parcial_repeticiones = False
+
         self.clasificadores = self.crear_estadisticas_vacias()
 
     #---------------------------------------------------------
@@ -67,7 +74,7 @@ class MotorReparto:
     #---------------------------------------------------------
     # Reparto general
     #---------------------------------------------------------
-    def reparto_general(self, clasificadores_activos, tamano_bloque=10, prioridad="NORMAL", configuracion_paises=None, configuracion_prioridad_paises=None):
+    def reparto_general(self, clasificadores_activos, tamano_bloque=10, prioridad="NORMAL", configuracion_paises=None, configuracion_prioridad_paises=None, repeticiones=None):
 
         self.clasificadores_activos = clasificadores_activos
         self.tamano_bloque = tamano_bloque
@@ -84,7 +91,9 @@ class MotorReparto:
             }
 
         self.cargar_tmp()
+        self.aplicar_repeticiones(repeticiones)
         self.cargar_destinos()
+        self.validar_capacidad_repeticiones()
         self.validar_capacidad_paises_forzados()
         self.calcular_tramos_destinos()
         self.ordenar_tiendas()
@@ -105,6 +114,11 @@ class MotorReparto:
 
         if self.hay_paises_fijos():
             self.validar_reparto_completo()
+        elif self.repeticiones:
+            if self.pedido_parcial_repeticiones:
+                self.validar_copias_completas()
+            else:
+                self.validar_reparto_completo()
 
         total_guardado = self.guardar_reparto_clasificador()
         self.imprimir_resumen_final(total_guardado)
@@ -114,6 +128,89 @@ class MotorReparto:
             "LadoCorto": dict(self.opcion_lado_corto or {}),
             "Clasificadores": list(self.clasificadores_activos),
         }
+
+    #---------------------------------------------------------
+    # V2.5 - Repeticion de Tienda+Aparte en el mismo CLA
+    #---------------------------------------------------------
+    def aplicar_repeticiones(self, repeticiones):
+        """Convierte cada Tienda+Aparte repetida en N lineas con lotes / N."""
+        self.repeticiones = normalizar_repeticiones(repeticiones)
+        self.cla_repeticion = {}
+        self.lineas_sin_repeticiones = len(self.tmp)
+        self.pedido_parcial_repeticiones = False
+        if self.repeticiones:
+            self.tmp = expandir_filas(list(self.tmp), self.repeticiones)
+
+    def clave_tienda(self, tienda):
+        try:
+            return (int(tienda[0]), int(tienda[1] or 0))
+        except Exception:
+            return None
+
+    def validar_capacidad_repeticiones(self):
+        if not self.repeticiones:
+            return
+        capacidad = sum(1 for destino in self.destinos if destino.get("Libre", True))
+        base = int(getattr(self, "lineas_sin_repeticiones", len(self.tmp)))
+        if base > capacidad:
+            # El pedido ya no cabia entero (p. ej. un carrusel): las copias
+            # ocupan destinos de otras tiendas, pero cada tienda repetida debe
+            # quedar con TODAS sus copias o con ninguna.
+            self.pedido_parcial_repeticiones = True
+            return
+        if len(self.tmp) > capacidad:
+            raise Exception(
+                "No caben las repeticiones de tiendas. Destinos necesarios: "
+                + str(len(self.tmp))
+                + " | disponibles: "
+                + str(capacidad)
+                + ". Reduce las repeticiones."
+            )
+
+    def validar_copias_completas(self):
+        """Pedido parcial: cada tienda repetida con todas sus copias y un CLA."""
+        if not self.repeticiones:
+            return
+        colocadas = {}
+        for destino in self.destinos:
+            if destino.get("Tienda") is None or destino.get("Libre", False):
+                continue
+            clave = (int(destino["Tienda"]), int(destino.get("Aparte") or 0))
+            if clave in self.repeticiones:
+                colocadas[clave] = colocadas.get(clave, 0) + 1
+        incompletas = [
+            clave for clave, veces in self.repeticiones.items()
+            if 0 < colocadas.get(clave, 0) < veces
+        ]
+        if incompletas:
+            raise Exception(
+                "No caben todas las copias de las tiendas repetidas: "
+                + ", ".join(
+                    str(c[0]) + "/" + str(c[1]) + " (" + str(colocadas[c]) + " de "
+                    + str(self.repeticiones[c]) + ")"
+                    for c in incompletas
+                )
+                + ". Reduce las repeticiones."
+            )
+        self.validar_reparto_completo_repeticiones()
+
+    def validar_reparto_completo_repeticiones(self):
+        """Todas las copias de cada tienda repetida deben ir al mismo CLA."""
+        if not self.repeticiones:
+            return
+        por_clave = {}
+        for destino in self.destinos:
+            if destino.get("Tienda") is None:
+                continue
+            clave = (int(destino["Tienda"]), int(destino.get("Aparte") or 0))
+            if clave in self.repeticiones:
+                por_clave.setdefault(clave, set()).add(destino["Clasificador"])
+        for clave, clas in por_clave.items():
+            if len(clas) > 1:
+                raise Exception(
+                    "ERROR: la tienda " + str(clave[0]) + " aparte " + str(clave[1])
+                    + " repetida ha quedado en mas de un CLA."
+                )
 
     #---------------------------------------------------------
     # Calcular bloque de destino
@@ -277,6 +374,13 @@ class MotorReparto:
     # Obtener clasificador forzado por pais
     #---------------------------------------------------------
     def obtener_clasificador_forzado_pais(self, tienda):
+
+        # V2.5: una Tienda+Aparte repetida va siempre al CLA de su primera
+        # copia colocada.
+        if self.repeticiones:
+            clave = self.clave_tienda(tienda)
+            if clave in self.cla_repeticion:
+                return self.cla_repeticion[clave]
 
         if self.configuracion_paises is None:
             return None
@@ -595,6 +699,7 @@ class MotorReparto:
     def resetear_reparto_en_memoria(self):
 
         self.clasificadores = self.crear_estadisticas_vacias()
+        self.cla_repeticion = {}
 
         for destino in self.destinos:
             destino["Libre"] = True
@@ -688,9 +793,18 @@ class MotorReparto:
         esperados = len(self.tmp)
 
         if asignados == esperados:
+            self.validar_reparto_completo_repeticiones()
             return
 
         pendientes = esperados - asignados
+
+        if self.repeticiones and not self.hay_paises_fijos():
+            raise Exception(
+                "No se pudo completar el reparto con las tiendas repetidas. Quedaron "
+                + str(pendientes)
+                + " destinos sin colocar (las copias deben ir al mismo CLA). "
+                "Reduce las repeticiones o revisa la capacidad."
+            )
 
         raise Exception(
             "No se pudo completar el reparto con los paises fijos. "
@@ -1778,6 +1892,11 @@ class MotorReparto:
         self.clasificadores[clasificador]["Lotes"] += tienda[2]
         self.clasificadores[clasificador]["Tiendas"] += 1
         self.clasificadores[clasificador]["Lados"][lado][descripcion] += tienda[2]
+
+        if self.repeticiones:
+            clave = self.clave_tienda(tienda)
+            if clave in self.repeticiones:
+                self.cla_repeticion.setdefault(clave, clasificador)
 
     #---------------------------------------------------------
     # Guardar reparto final en SQLite

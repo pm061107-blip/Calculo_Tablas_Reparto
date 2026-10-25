@@ -9,6 +9,34 @@ from modulos.dialogo_progreso import DialogoProgreso
 from modulos.gestor_reset_calculos import GestorResetCalculos
 
 
+def _pais_bloqueado(formulario, clave):
+    """V2.6: pais con dos tipos de caja (no se puede elegir 300/400)."""
+    item = (getattr(formulario, "paises_vars", {}) or {}).get(clave) or {}
+    datos = item.get("datos") or {}
+    return bool((datos.get("TiposFinales") or {}).get("Bloqueado"))
+
+
+def _paises_bloqueados(formulario):
+    """Nombres de pais (sin repetir) de las filas bloqueadas."""
+    resultado = []
+    for clave, item in (getattr(formulario, "paises_vars", {}) or {}).items():
+        if not _pais_bloqueado(formulario, clave):
+            continue
+        pais = str((item.get("datos") or {}).get("Pais", "") or clave).split("|")[0]
+        if pais not in resultado:
+            resultado.append(pais)
+    return resultado
+
+
+def _clave_fila(gestor, fila):
+    """Clave unica de una fila: pais, o pais|tipo en las lineas desglosadas."""
+    if fila.get("Clave"):
+        return str(fila["Clave"])
+    normalizar = getattr(gestor, "normalizar_pais", None)
+    pais = fila.get("Pais", "")
+    return normalizar(pais) if normalizar else str(pais or "").strip().upper()
+
+
 class FormularioVolumetriaReutilizacionPaises:
     """Formulario independiente para la volumetria y reutilizacion por pais.
 
@@ -50,23 +78,27 @@ class FormularioVolumetriaReutilizacionPaises:
         return self.formulario_cajas.resumen_cajas
 
     def crear_controles(self):
-        contenedor = crear_marco_scrollable(self.ventana, padx=0, pady=0)
+        # V2.7: sin scroll exterior. La cabecera ocupa lo minimo y la tabla de
+        # paises se estira para llenar TODO el alto disponible, sea cual sea la
+        # resolucion del PC (la tabla tiene su propio scroll).
+        contenedor = tk.Frame(self.ventana)
+        contenedor.pack(fill="both", expand=True)
         self.contenedor_principal = contenedor
-        cabecera = tk.Frame(contenedor)
-        cabecera.pack(fill="x", padx=16, pady=(12, 4))
 
+        cabecera = tk.Frame(contenedor)
+        cabecera.pack(fill="x", padx=10, pady=(6, 2))
         tk.Label(
             cabecera,
             text="VOLUMETRIA Y REUTILIZACION DE CAJAS POR PAIS",
-            font=("Arial", 17, "bold"),
+            font=("Arial", 13, "bold"),
         ).pack(side="left")
-
         tk.Button(
             cabecera,
             text="Cerrar y volver",
-            width=18,
+            width=16,
             command=self.cerrar,
         ).pack(side="right")
+        self.crear_boton_reset(cabecera)
 
         self.lbl_contexto = tk.Label(
             contenedor,
@@ -75,20 +107,7 @@ class FormularioVolumetriaReutilizacionPaises:
             anchor="w",
             justify="left",
         )
-        self.lbl_contexto.pack(fill="x", padx=18, pady=(0, 4))
-
-        self.crear_boton_reset(contenedor)
-
-        tk.Label(
-            self.ventana,
-            text=(
-                "Este formulario utiliza el pedido, la volumetria, los contenedores "
-                "y el ultimo calculo de cajas ya cargados en el formulario anterior."
-            ),
-            font=("Arial", 9),
-            anchor="w",
-            justify="left",
-        ).pack(fill="x", padx=18, pady=(0, 8))
+        self.lbl_contexto.pack(fill="x", padx=12, pady=(0, 2))
 
         self.crear_bloque_paises(contenedor)
 
@@ -96,14 +115,13 @@ class FormularioVolumetriaReutilizacionPaises:
         tk.Button(
             contenedor,
             text="RESETEAR CALCULO DE PAISES",
-            height=1,
             bg="#cc0000",
             fg="white",
             activebackground="#990000",
             activeforeground="white",
-            font=("Arial", 10, "bold"),
+            font=("Arial", 9, "bold"),
             command=self.resetear_calculo_paises,
-        ).pack(fill="x", padx=18, pady=(0, 6))
+        ).pack(side="right", padx=(0, 10))
 
     def resetear_calculo_paises(self):
         if not messagebox.askyesno(
@@ -177,7 +195,7 @@ class FormularioVolumetriaReutilizacionPaises:
             pass
 
     def actualizar_contexto(self):
-        pedido = self.contar_tabla("ESTAREPP")
+        pedido = self.contar_tabla("CAJAS_PEDIDO_LINEAS")
         volumetria = self.contar_tabla("CAJAS_VOLUMETRIA")
         contenedores = self.contar_tabla("CAJAS_CONTENEDORES")
         texto = (
@@ -259,7 +277,7 @@ class FormularioVolumetriaReutilizacionPaises:
             padx=10,
             pady=8,
         )
-        marco.pack(fill="both", expand=True, padx=16, pady=(7, 12))
+        marco.pack(fill="both", expand=True, padx=10, pady=(2, 8))
 
         fila_acciones = tk.Frame(marco)
         fila_acciones.pack(fill="x", pady=(0, 4))
@@ -311,21 +329,30 @@ class FormularioVolumetriaReutilizacionPaises:
             anchor="w",
             justify="left",
         )
-        self.lbl_seleccion_paises.pack(fill="x", pady=(8, 2))
+        self.lbl_seleccion_paises.pack(fill="x", pady=(4, 1))
 
         self.lbl_incidencias_paises = tk.Label(
             marco,
             text="",
-            font=("Arial", 9),
+            font=("Arial", 8),
             anchor="w",
             justify="left",
         )
-        self.lbl_incidencias_paises.pack(fill="x", pady=(0, 5))
+        self.lbl_incidencias_paises.pack(fill="x", pady=(0, 3))
 
-        alto_tabla = max(430, int(self.ventana.winfo_screenheight() or 760) - 285)
-        contenedor_tabla = tk.Frame(marco, bd=1, relief="sunken", height=alto_tabla)
+        # Los textos largos se parten en lineas segun el ancho real de la
+        # ventana en vez de quedar cortados.
+        def _ajustar_textos(evento):
+            ancho = max(300, int(evento.width) - 20)
+            for etiqueta in (self.lbl_seleccion_paises, self.lbl_incidencias_paises):
+                try:
+                    etiqueta.config(wraplength=ancho)
+                except Exception:
+                    pass
+        marco.bind("<Configure>", _ajustar_textos, add="+")
+
+        contenedor_tabla = tk.Frame(marco, bd=1, relief="sunken")
         contenedor_tabla.pack(fill="both", expand=True, pady=(2, 0))
-        contenedor_tabla.pack_propagate(False)
         contenedor_tabla.grid_rowconfigure(0, weight=1)
         contenedor_tabla.grid_columnconfigure(0, weight=1)
 
@@ -356,6 +383,36 @@ class FormularioVolumetriaReutilizacionPaises:
         scroll_y.grid(row=0, column=1, sticky="ns")
         scroll_x.grid(row=1, column=0, sticky="ew")
 
+        def _rueda(evento):
+            try:
+                if getattr(evento, "num", None) == 4:
+                    self.canvas_paises.yview_scroll(-3, "units")
+                elif getattr(evento, "num", None) == 5:
+                    self.canvas_paises.yview_scroll(3, "units")
+                elif int(evento.delta):
+                    self.canvas_paises.yview_scroll(int(-1 * (int(evento.delta) / 120)), "units")
+            except Exception:
+                pass
+
+        def _activar_rueda(_evento=None):
+            try:
+                self.canvas_paises.bind_all("<MouseWheel>", _rueda)
+                self.canvas_paises.bind_all("<Button-4>", _rueda)
+                self.canvas_paises.bind_all("<Button-5>", _rueda)
+            except Exception:
+                pass
+
+        def _desactivar_rueda(_evento=None):
+            try:
+                self.canvas_paises.unbind_all("<MouseWheel>")
+                self.canvas_paises.unbind_all("<Button-4>")
+                self.canvas_paises.unbind_all("<Button-5>")
+            except Exception:
+                pass
+
+        contenedor_tabla.bind("<Enter>", _activar_rueda, add="+")
+        contenedor_tabla.bind("<Leave>", _desactivar_rueda, add="+")
+
         self._crear_cabecera_tabla_paises()
 
     def _crear_cabecera_tabla_paises(self):
@@ -366,6 +423,7 @@ class FormularioVolumetriaReutilizacionPaises:
             "CAJA 400",
             "TIPO 400 A GUARDAR",
             "MAESTRO ACTUAL",
+            "AVISO (clic = detalle)",
         ]
         for col, texto in enumerate(cabeceras):
             tk.Label(
@@ -383,6 +441,7 @@ class FormularioVolumetriaReutilizacionPaises:
         self.frame_paises.grid_columnconfigure(3, weight=1)
         self.frame_paises.grid_columnconfigure(4, weight=2)
         self.frame_paises.grid_columnconfigure(5, weight=2)
+        self.frame_paises.grid_columnconfigure(6, weight=3)
 
     def limpiar_tabla_paises(self):
         if not hasattr(self, "frame_paises"):
@@ -395,7 +454,7 @@ class FormularioVolumetriaReutilizacionPaises:
         self._crear_cabecera_tabla_paises()
 
     def validar_calculo_paises(self):
-        if self.contar_tabla("ESTAREPP") <= 0:
+        if self.contar_tabla("CAJAS_PEDIDO_LINEAS") <= 0:
             messagebox.showwarning("Falta pedido", "Primero debes importar el pedido.", parent=self.ventana)
             return False
         if self.contar_tabla("CAJAS_VOLUMETRIA") <= 0:
@@ -430,7 +489,14 @@ class FormularioVolumetriaReutilizacionPaises:
         try:
             calculador = CalculadorCajasPaises()
             progreso.actualizar(mensaje="Calculando volumen por pais...")
-            self.resumen_paises = calculador.calcular()
+            # V2.7: los paises con dos tipos de caja se calculan en una linea
+            # por cada tipo de caja (cada tipo lleva sus propias cajas).
+            try:
+                bloqueados = self.gestor_tipo_caja_pais.paises_bloqueados_dos_tipos()
+                desglose = self.gestor_tipo_caja_pais.tipo_final_por_tienda(bloqueados)
+            except Exception:
+                desglose = {}
+            self.resumen_paises = calculador.calcular(desglose_tiendas=desglose)
             progreso.actualizar(mensaje="Aplicando seleccion automatica de paises 400...")
             self.formulario_cajas.resumen_paises = self.resumen_paises
             self.formulario_cajas.actualizar_estado_volumetria()
@@ -467,7 +533,7 @@ class FormularioVolumetriaReutilizacionPaises:
             progreso.cerrar()
 
     def exportar_sin_volumetria(self):
-        if self.contar_tabla("ESTAREPP") <= 0:
+        if self.contar_tabla("CAJAS_PEDIDO_LINEAS") <= 0:
             messagebox.showwarning("Falta pedido", "Primero debes importar el pedido.", parent=self.ventana)
             return
         if self.contar_tabla("CAJAS_VOLUMETRIA") <= 0:
@@ -503,6 +569,16 @@ class FormularioVolumetriaReutilizacionPaises:
         except Exception as error:
             messagebox.showerror("Error exportando sin volumetria", str(error), parent=self.ventana)
 
+    # ---------------------------------------------------------
+    # V2.7 - utilidades de fila (pais normal o linea por tipo de caja)
+    # ---------------------------------------------------------
+    def _clave_fila(self, fila):
+        return _clave_fila(self.gestor_tipo_caja_pais, fila)
+
+    @staticmethod
+    def _es_tipo_400(tipo):
+        return str(tipo or "").strip().upper() in {"3_USADA_40", "4_NUEVA_40"}
+
     def aplicar_seleccion_automatica_paises(self):
         if not self.resumen_paises:
             return
@@ -514,35 +590,118 @@ class FormularioVolumetriaReutilizacionPaises:
         self.enriquecer_tipos_400_paises(paises)
 
         maestro_400 = self.obtener_paises_400_maestro_actual()
-        claves_calculadas = {
-            self.gestor_tipo_caja_pais.normalizar_pais(fila.get("Pais", ""))
-            for fila in paises
-        }
-        paises_maestro_en_calculo = set()
+        normalizar = self.gestor_tipo_caja_pais.normalizar_pais
         for fila in paises:
-            clave = self.gestor_tipo_caja_pais.normalizar_pais(
-                fila.get("Pais", "")
-            )
-            tipo_actual = maestro_400.get(clave, "")
+            tipo_actual = maestro_400.get(normalizar(fila.get("Pais", "")), "")
             fila["YaEnMaestro400"] = bool(tipo_actual)
             fila["TipoCajaPaisActual"] = tipo_actual
-            if tipo_actual:
-                paises_maestro_en_calculo.add(clave)
 
-        seleccion_400, _ = CalculadorCajasPaises.seleccionar_paises_400(
-            paises,
-            self.cajas_400_agotadas,
+        # Paises con dos tipos de caja (TipoCajaPais + tiendas a mayores)
+        tipos_finales = self.obtener_tipos_finales_paises(paises)
+        bloqueadas = set()   # claves de fila que no se pueden elegir
+        solo_300 = set()
+        solo_400 = set()
+        fijas_400 = set()    # bloqueadas cuyas cajas cuentan como 400
+        for fila in paises:
+            clave = self._clave_fila(fila)
+            info = dict(tipos_finales.get(normalizar(fila.get("Pais", ""))) or {})
+            if fila.get("TipoFijo"):
+                # Linea de un pais desglosado: tipo de caja fijo.
+                info["Bloqueado"] = True
+                info["Permite300"] = False
+                info["Permite400"] = False
+                info["Motivo"] = "2 TIPOS: linea fija " + str(fila["TipoFijo"])
+            fila["TiposFinales"] = info
+            if info.get("Bloqueado"):
+                bloqueadas.add(clave)
+                tipo_fijo = fila.get("TipoFijo")
+                if (tipo_fijo and self._es_tipo_400(tipo_fijo)) or (
+                    not tipo_fijo and fila.get("YaEnMaestro400")
+                ):
+                    fijas_400.add(clave)
+            elif info and not info.get("Permite400", True):
+                solo_300.add(clave)
+            elif info and not info.get("Permite300", True):
+                solo_400.add(clave)
+
+        no_elegibles = bloqueadas | solo_300 | solo_400
+        elegibles = [f for f in paises if self._clave_fila(f) not in no_elegibles]
+        cajas_fijas_400 = sum(
+            int(f.get("Cajas400", 0) or 0)
+            for f in paises
+            if self._clave_fila(f) in (fijas_400 | solo_400)
         )
-        seleccion_400 = set(seleccion_400) | paises_maestro_en_calculo
-
-        # Si el maestro contiene paises 400 que no aparecen en el calculo actual,
-        # no se muestran en la tabla porque no tienen demanda en este pedido.
-        # La sincronizacion posterior sigue siendo exclusiva sobre los paises
-        # marcados en la tabla visible.
-        _ = claves_calculadas
+        seleccion_400, _ = CalculadorCajasPaises.seleccionar_paises_400(
+            elegibles,
+            max(0, self.cajas_400_agotadas - cajas_fijas_400),
+        )
+        seleccion_400 = {normalizar(p) for p in seleccion_400}
+        # Los que ya estan en el maestro 400 se mantienen marcados.
+        seleccion_400 |= {
+            self._clave_fila(f) for f in elegibles if f.get("YaEnMaestro400")
+        }
+        seleccion_400 |= fijas_400 | solo_400
+        seleccion_400 -= solo_300
 
         self.mostrar_tabla_paises(paises, seleccion_400)
         self.actualizar_totales_paises()
+
+    def obtener_tipos_finales_paises(self, paises):
+        try:
+            return self.gestor_tipo_caja_pais.analizar_tipos_finales(
+                [fila.get("Pais", "") for fila in paises]
+            ) or {}
+        except Exception:
+            return {}
+
+    def mostrar_detalle_tipos_pais(self, pais):
+        item = self.paises_vars.get(pais) or {}
+        datos = item.get("datos") or {}
+        info = datos.get("TiposFinales") or {}
+        pais = str(datos.get("Pais", "") or pais).split("|")[0]
+        lineas = [pais, ""]
+        if datos.get("TipoFijo"):
+            lineas.extend([
+                "Este pais tiene tiendas con distintos tipos de caja, por eso se",
+                "calcula en una linea por tipo. Esta linea: " + str(datos["TipoFijo"])
+                + " -> " + format(float(datos.get("VolumenM3", 0) or 0), ".6f") + " m3, "
+                + str(datos.get("Cajas400" if self._es_tipo_400(datos["TipoFijo"]) else "Cajas300", 0))
+                + " cajas " + ("400" if self._es_tipo_400(datos["TipoFijo"]) else "300") + ".",
+                "",
+            ])
+        if info.get("Motivo"):
+            lineas.extend([info["Motivo"], ""])
+        actual = info.get("TipoCajaPaisActual") or "no esta en TipoCajaPais"
+        lineas.append("TipoCajaPais actual: " + actual)
+        lineas.append("")
+        lineas.append("Tiendas en TipoCajaTiendaAMayores (mandan sobre el pais):")
+        for tipo, tiendas in sorted((info.get("EjemplosAMayores") or {}).items()):
+            total = (info.get("TiendasAMayores") or {}).get(tipo, len(tiendas))
+            lineas.append(
+                "- " + tipo + ": " + str(total) + " tiendas ("
+                + ", ".join(str(t) for t in tiendas)
+                + (" ..." if total > len(tiendas) else "") + ")"
+            )
+        lineas.append("")
+        lineas.append("Resto de tiendas del pais (TipoCajaInicial homologado):")
+        resto = info.get("TiendasResto") or {}
+        if not resto:
+            lineas.append("- ninguna")
+        for tipo, tiendas in sorted((info.get("EjemplosResto") or {}).items()):
+            total = resto.get(tipo, len(tiendas))
+            lineas.append(
+                "- " + tipo + ": " + str(total) + " tiendas ("
+                + ", ".join(str(t) for t in tiendas)
+                + (" ..." if total > len(tiendas) else "") + ")"
+            )
+        if info.get("Bloqueado"):
+            lineas.extend([
+                "",
+                "El pais no se puede cambiar a 300/400 desde aqui y al cargar el",
+                "maestro se conserva tal como esta. Para desbloquearlo hay que",
+                "corregir TipoCajaTiendaAMayores o TipoCajaPais en Maestros.",
+            ])
+        messagebox.showinfo("Tipos de caja de " + pais, "\n".join(lineas), parent=self.ventana)
 
     def obtener_paises_400_maestro_actual(self):
         """Devuelve Pais -> TipoCajaPais para paises actualmente 400.
@@ -600,107 +759,139 @@ class FormularioVolumetriaReutilizacionPaises:
 
     def mostrar_tabla_paises(self, paises, seleccion_400):
         self.limpiar_tabla_paises()
-
-        seleccion_normalizada = {
-            self.gestor_tipo_caja_pais.normalizar_pais(pais)
-            for pais in seleccion_400
-        }
+        seleccion = set(seleccion_400 or [])
 
         for indice, fila in enumerate(paises):
             fila_ui = indice + 1
+            clave = self._clave_fila(fila)
+            tipo_fijo = str(fila.get("TipoFijo", "") or "")
             pais_mostrado = str(fila.get("Pais", ""))
-            clave_pais = self.gestor_tipo_caja_pais.normalizar_pais(pais_mostrado)
-            seleccionada_400 = clave_pais in seleccion_normalizada
+            if tipo_fijo:
+                pais_mostrado += "  -  " + tipo_fijo
+            seleccionada_400 = clave in seleccion
             ya_en_maestro = bool(fila.get("YaEnMaestro400"))
             tipo_actual_maestro = str(fila.get("TipoCajaPaisActual", "") or "")
-            color_fondo = "#d9ead3" if ya_en_maestro else "#ffffff"
-            color_fondo_check = "#d9ead3" if ya_en_maestro else self.ventana.cget("bg")
+            info = fila.get("TiposFinales") or {}
+            bloqueado = bool(info.get("Bloqueado"))
+            permite_300 = bool(info.get("Permite300", True)) and not bloqueado
+            permite_400 = bool(info.get("Permite400", True)) and not bloqueado
+            motivo = str(info.get("Motivo", "") or "")
+
+            if bloqueado:
+                color_fondo = "#f9cb9c"
+            elif not (permite_300 and permite_400):
+                color_fondo = "#fff2cc"
+            elif ya_en_maestro:
+                color_fondo = "#d9ead3"
+            else:
+                color_fondo = "#ffffff"
+            color_fondo_check = color_fondo if color_fondo != "#ffffff" else self.ventana.cget("bg")
+            negrita = ("Arial", 9, "bold")
+            normal = ("Arial", 9)
 
             var300 = tk.IntVar(value=0 if seleccionada_400 else 1)
             var400 = tk.IntVar(value=1 if seleccionada_400 else 0)
-            self.paises_vars[clave_pais] = {
+            self.paises_vars[clave] = {
                 "300": var300,
                 "400": var400,
                 "datos": fila,
+                "Fijo400": 1 if seleccionada_400 else 0,
             }
 
-            tk.Label(
-                self.frame_paises,
-                text=pais_mostrado,
-                anchor="w",
-                padx=6,
-                pady=3,
-                bd=1,
-                relief="groove",
-                bg=color_fondo,
-                font=("Arial", 9, "bold") if ya_en_maestro else ("Arial", 9),
-            ).grid(row=fila_ui, column=0, sticky="nsew")
-            tk.Label(
-                self.frame_paises,
-                text=format(float(fila.get("VolumenM3", 0.0) or 0.0), ".6f"),
-                anchor="e",
-                padx=6,
-                pady=3,
-                bd=1,
-                relief="groove",
-                bg=color_fondo,
-            ).grid(row=fila_ui, column=1, sticky="nsew")
+            def celda(columna, texto, **opciones):
+                etiqueta = tk.Label(
+                    self.frame_paises,
+                    text=texto,
+                    padx=6,
+                    pady=1,
+                    bd=1,
+                    relief="groove",
+                    bg=color_fondo,
+                    **opciones,
+                )
+                etiqueta.grid(row=fila_ui, column=columna, sticky="nsew")
+                return etiqueta
 
+            celda(0, pais_mostrado, anchor="w", font=negrita if (ya_en_maestro or tipo_fijo) else normal)
+            celda(1, format(float(fila.get("VolumenM3", 0.0) or 0.0), ".6f"), anchor="e")
+
+            # En una linea fija solo se ensena el numero del tipo que lleva.
+            texto300 = str(int(fila.get("Cajas300", 0) or 0))
+            texto400 = str(int(fila.get("Cajas400", 0) or 0))
+            if tipo_fijo:
+                if self._es_tipo_400(tipo_fijo):
+                    texto300 = "-"
+                else:
+                    texto400 = "-"
             tk.Checkbutton(
                 self.frame_paises,
-                text=str(int(fila.get("Cajas300", 0) or 0)),
+                text=texto300,
                 variable=var300,
                 bg=color_fondo_check,
                 activebackground=color_fondo_check,
-                command=lambda p=clave_pais: self.cambiar_tipo_pais(p, "300"),
+                pady=0,
+                command=lambda p=clave: self.cambiar_tipo_pais(p, "300"),
+                state="normal" if permite_300 else "disabled",
             ).grid(row=fila_ui, column=2, sticky="nsew")
-
             tk.Checkbutton(
                 self.frame_paises,
-                text=str(int(fila.get("Cajas400", 0) or 0)),
+                text=texto400,
                 variable=var400,
                 bg=color_fondo_check,
                 activebackground=color_fondo_check,
-                command=lambda p=clave_pais: self.cambiar_tipo_pais(p, "400"),
+                pady=0,
+                command=lambda p=clave: self.cambiar_tipo_pais(p, "400"),
+                state="normal" if permite_400 else "disabled",
             ).grid(row=fila_ui, column=3, sticky="nsew")
 
             diagnostico = fila.get("DiagnosticoTipo400", {}) or {}
-            estado = diagnostico.get("Estado", "")
-            color_texto = "#006100" if estado == "OK" else "#9c0006"
-            tk.Label(
-                self.frame_paises,
-                text=str(fila.get("TipoCaja400Maestro", "")),
-                anchor="center",
-                padx=6,
-                pady=3,
-                bd=1,
-                relief="groove",
-                fg=color_texto,
-                bg=color_fondo,
-                font=("Arial", 9, "bold"),
-            ).grid(row=fila_ui, column=4, sticky="nsew")
+            if tipo_fijo or bloqueado:
+                texto_tipo = "-"
+                color_tipo = "#666666"
+            else:
+                texto_tipo = str(fila.get("TipoCaja400Maestro", ""))
+                color_tipo = "#006100" if diagnostico.get("Estado", "") == "OK" else "#9c0006"
+            celda(4, texto_tipo, anchor="center", fg=color_tipo, font=negrita)
 
-            texto_maestro = ""
-            if ya_en_maestro:
-                texto_maestro = "YA EN MAESTRO 400"
-                if tipo_actual_maestro:
-                    texto_maestro += "\n" + tipo_actual_maestro
-            tk.Label(
-                self.frame_paises,
-                text=texto_maestro,
-                anchor="center",
-                padx=6,
-                pady=3,
-                bd=1,
-                relief="groove",
+            texto_maestro = ("400  " + tipo_actual_maestro) if ya_en_maestro else ""
+            celda(
+                5, texto_maestro, anchor="center",
                 fg="#006100" if ya_en_maestro else "#000000",
-                bg=color_fondo,
-                font=("Arial", 9, "bold") if ya_en_maestro else ("Arial", 9),
-            ).grid(row=fila_ui, column=5, sticky="nsew")
+                font=negrita if ya_en_maestro else normal,
+            )
+
+            texto_aviso = ""
+            if tipo_fijo:
+                texto_aviso = "PAIS CON 2 TIPOS - linea fija " + (
+                    "(cuenta en 400)" if self._es_tipo_400(tipo_fijo) else "(cuenta en 300)"
+                )
+            elif motivo:
+                texto_aviso = motivo
+            aviso = celda(
+                6, texto_aviso, anchor="w",
+                fg="#9c0006" if bloqueado else "#7f6000",
+                font=negrita if texto_aviso else normal,
+                cursor="hand2" if texto_aviso else "",
+            )
+            if texto_aviso:
+                aviso.bind(
+                    "<Button-1>",
+                    lambda _e, p=clave: self.mostrar_detalle_tipos_pais(p),
+                )
 
     def cambiar_tipo_pais(self, pais, tipo):
         item = self.paises_vars.get(pais)
         if not item:
+            return
+        info = (item.get("datos") or {}).get("TiposFinales") or {}
+        bloqueado = bool(info.get("Bloqueado"))
+        if bloqueado or (tipo == "300" and not info.get("Permite300", True)) \
+                or (tipo == "400" and not info.get("Permite400", True)):
+            # Opcion no permitida: se vuelve al estado fijo de la fila.
+            fijo_400 = int(item.get("Fijo400", 0))
+            item["400"].set(fijo_400)
+            item["300"].set(1 - fijo_400)
+            self.actualizar_totales_paises()
             return
         if tipo == "300":
             # Siempre queda exactamente un tipo seleccionado por pais.
@@ -718,16 +909,20 @@ class FormularioVolumetriaReutilizacionPaises:
         paises400 = 0
         errores_tipo_400 = 0
         paises_ya_en_maestro = 0
+        paises_bloqueados = set()
 
         for item in self.paises_vars.values():
             datos = item["datos"]
+            bloqueado = bool((datos.get("TiposFinales") or {}).get("Bloqueado"))
+            if bloqueado:
+                paises_bloqueados.add(str(datos.get("Pais", "")))
             if datos.get("YaEnMaestro400"):
                 paises_ya_en_maestro += 1
             if item["400"].get():
                 cajas400 += int(datos.get("Cajas400", 0) or 0)
                 paises400 += 1
                 diagnostico = datos.get("DiagnosticoTipo400", {}) or {}
-                if diagnostico.get("Estado") != "OK":
+                if diagnostico.get("Estado") != "OK" and not bloqueado:
                     errores_tipo_400 += 1
             elif item["300"].get():
                 cajas300 += int(datos.get("Cajas300", 0) or 0)
@@ -764,6 +959,10 @@ class FormularioVolumetriaReutilizacionPaises:
                 + "   |   " + situacion
                 + "   |   aprovechamiento 400: " + format(aprovechamiento, ".1f") + "%"
                 + "   |   ya en maestro 400: " + str(paises_ya_en_maestro)
+                + (
+                    "   |   PAISES CON 2 TIPOS (bloqueados): " + str(len(paises_bloqueados))
+                    if paises_bloqueados else ""
+                )
                 + texto_errores
             ),
             fg="#9c0006" if errores_tipo_400 > 0 else "#000000",
@@ -780,13 +979,14 @@ class FormularioVolumetriaReutilizacionPaises:
             return seleccionados
 
         for fila in self.resumen_paises.get("Paises", []) or []:
-            clave = self.gestor_tipo_caja_pais.normalizar_pais(
-                fila.get("Pais", "")
-            )
+            if fila.get("TipoFijo"):
+                continue
+            clave = _clave_fila(self.gestor_tipo_caja_pais, fila)
             item = self.paises_vars.get(clave)
-            if item and item["400"].get():
+            if item and item["400"].get() and not _pais_bloqueado(self, clave):
                 seleccionados.append(clave)
         return seleccionados
+
 
     def _texto_vista_previa_maestro(self, plan, seleccionados):
         eliminar = plan.get("Eliminar", []) or []
@@ -839,6 +1039,12 @@ class FormularioVolumetriaReutilizacionPaises:
                     "... y " + str(len(eliminar) - 30) + " paises mas."
                 )
 
+        conservados = plan.get("Conservados") or {}
+        if conservados:
+            lineas.extend(["", "Paises BLOQUEADOS (2 tipos de caja) que se conservan sin cambios:"])
+            for pais, tipo in sorted(conservados.items()):
+                lineas.append("- " + pais + " (" + str(tipo) + ")")
+
         if plan.get("Conflictos"):
             lineas.extend([
                 "",
@@ -866,9 +1072,16 @@ class FormularioVolumetriaReutilizacionPaises:
             return
 
         try:
-            plan = self.gestor_tipo_caja_pais.preparar_actualizacion(
-                seleccionados
-            )
+            bloqueados = _paises_bloqueados(self)
+            if bloqueados:
+                plan = self.gestor_tipo_caja_pais.preparar_actualizacion(
+                    seleccionados,
+                    conservar=bloqueados,
+                )
+            else:
+                plan = self.gestor_tipo_caja_pais.preparar_actualizacion(
+                    seleccionados
+                )
         except Exception as error:
             messagebox.showerror(
                 "Error preparando el maestro",
@@ -900,6 +1113,9 @@ class FormularioVolumetriaReutilizacionPaises:
             for fila in plan.get("Diagnosticos", [])
             if fila.get("Estado") == "OK"
         }
+        # Paises bloqueados (dos tipos de caja): se conservan tal cual.
+        for pais, tipo in (plan.get("Conservados") or {}).items():
+            maestro_objetivo[pais] = tipo
         conflictos_conservados = 0
 
         for conflicto in plan.get("Conflictos", []):

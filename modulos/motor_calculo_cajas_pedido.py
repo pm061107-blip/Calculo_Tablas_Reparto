@@ -8,7 +8,11 @@ from tkinter import filedialog
 from bd.basedatos import BaseDatos
 from modulos.algoritmo_xdoc_cajas import AlgoritmoXDOC
 from modulos.algoritmo_limpieza_celdas_cajas import AlgoritmoLimpiezaCeldas
-from modulos.algoritmo_mas_unidades_cajas import AlgoritmoMasUnidades
+from modulos.algoritmo_mas_unidades_cajas import AlgoritmoMasUnidades, clave_calle
+from modulos.gestor_pedidos_cajas import (
+    GestorPedidosCajas,
+    linea_eliminada_por_picos,
+)
 
 
 class MotorCalculoCajasPedido:
@@ -17,6 +21,10 @@ class MotorCalculoCajasPedido:
     # el perfil 01_UNICA. Se conserva PerfilVolumetria en tablas/resultados
     # solo por compatibilidad y trazabilidad.
     PERFIL_VOLUMETRIA_FIJO = "01_UNICA"
+
+    # V2.2: numero minimo de cajas con el mismo tamano para aceptar la moda
+    # calculada desde el stock del silo (cuando el SKU no tiene volumetria).
+    MODA_SILO_MINIMO_CAJAS = 2
 
     def __init__(self):
         self.bd = BaseDatos()
@@ -236,8 +244,12 @@ class MotorCalculoCajasPedido:
         }
 
     def crear_carga_pasillos_cajas(self):
-        """Carga independiente por numero de movimientos para MAS UNIDADES."""
-        return {str(i).zfill(2): 0 for i in range(1, 11)}
+        """Carga por CALLE (pasillo_lado) en numero de movimientos, V2.2."""
+        return {
+            str(i).zfill(2) + "_" + lado: 0
+            for i in range(1, 11)
+            for lado in ("01", "02")
+        }
 
     def clave_celda(self, caja):
         return self.texto(caja.get("Celda") or caja.get("Posicion"))
@@ -333,6 +345,9 @@ class MotorCalculoCajasPedido:
         self.bd.ejecutar("DELETE FROM CAJAS_PEDIDO_DEMANDA")
         self.bd.ejecutar("DELETE FROM CAJAS_DEMANDA_PENDIENTE_CLASIFICADOR")
 
+        # V2.1: Calculo de cajas trabaja con sus propios pedidos acumulados.
+        # Cada linea indica si su pedido se marco para calcular picos.
+        GestorPedidosCajas(self.bd.conexion)
         registros = self.bd.consultar("""
             SELECT
                 Tienda,
@@ -344,8 +359,9 @@ class MotorCalculoCajasPedido:
                 Campaña,
                 Año,
                 UxL,
-                Unidades
-            FROM ESTAREPP
+                Unidades,
+                IFNULL(CalcularPicos, 1)
+            FROM CAJAS_PEDIDO_LINEAS
         """)
 
         agrupado = {}
@@ -364,7 +380,7 @@ class MotorCalculoCajasPedido:
             if self.numero(valor, None) is not None
         }
 
-        for tienda, aparte, modelo, calidad, color, talla_num, campana, anio, uxl, unidades in registros:
+        for tienda, aparte, modelo, calidad, color, talla_num, campana, anio, uxl, unidades, calcular_picos in registros:
             tienda_num = self.numero(tienda, None)
             if tienda_num is not None and tienda_num in tiendas_excluidas:
                 continue
@@ -376,10 +392,11 @@ class MotorCalculoCajasPedido:
 
             sku = self.crear_sku(modelo, calidad, color, talla, campana, anio)
             es_tienda_fija = tienda_num is not None and tienda_num in tiendas_fijas
-            if (
-                skus_permitidos is not None
-                and sku not in skus_permitidos
-                and not es_tienda_fija
+            if linea_eliminada_por_picos(
+                sku,
+                bool(int(calcular_picos or 0)),
+                es_tienda_fija,
+                skus_permitidos,
             ):
                 continue
 
@@ -530,9 +547,18 @@ class MotorCalculoCajasPedido:
 
         # En caso de empate de frecuencia no se elige automaticamente el valor
         # mayor. Se usa el menor como criterio determinista de seguridad.
+        #
+        # V2.2: la moda del silo solo es valida si el tamano mas frecuente
+        # aparece en al menos MODA_SILO_MINIMO_CAJAS cajas. Sin un tamano
+        # repetido no hay moda real: antes se tomaba la caja de resto mas
+        # pequena (1, 2, 3 uds), XDOC la bajaba y obligaba a bajar otra caja.
         for sku, contador in contadores_moda.items():
             if contador:
-                moda = sorted(contador.items(), key=lambda x: (-x[1], x[0]))[0][0]
+                moda, frecuencia = sorted(
+                    contador.items(), key=lambda x: (-x[1], x[0])
+                )[0]
+                if int(frecuencia) < self.MODA_SILO_MINIMO_CAJAS:
+                    continue
                 self.moda_silo[sku] = int(moda)
 
         # Regla temporal: se carga exclusivamente la volumetria 01_UNICA.
@@ -833,8 +859,9 @@ class MotorCalculoCajasPedido:
             return
 
         if algoritmo == "MAS_UNIDADES":
-            self.carga_pasillos_mas_unidades[pasillo] = (
-                self.carga_pasillos_mas_unidades.get(pasillo, 0) + 1
+            calle = clave_calle(caja.get("Pasillo"), caja.get("Lado"))
+            self.carga_pasillos_mas_unidades[calle] = (
+                self.carga_pasillos_mas_unidades.get(calle, 0) + 1
             )
             return
 
@@ -1246,9 +1273,17 @@ class MotorCalculoCajasPedido:
             )
 
     def ejecutar_mas_unidades(self, demandas):
-        # El estudio real muestra que MAS UNIDADES compensa movimientos/cajas
-        # de forma independiente. No hereda la carga por lotes de XDOC.
+        # V2.2: MAS UNIDADES equilibra movimientos por calle (pasillo + lado)
+        # contando tambien las cajas que ya ha bajado XDOC, porque para el
+        # silo todas son movimientos de la misma ola.
         self.carga_pasillos_mas_unidades = self.crear_carga_pasillos_cajas()
+        for fila in self.detalle_buffer:
+            if fila[0] != "XDOC":
+                continue
+            calle = clave_calle(fila[7], fila[8])
+            self.carga_pasillos_mas_unidades[calle] = (
+                self.carga_pasillos_mas_unidades.get(calle, 0) + 1
+            )
 
         # MUY IMPORTANTE: despues de XDOC se agrega TODO el pendiente por SKU.
         for demanda in self.agrupar_pendiente_por_sku(demandas):

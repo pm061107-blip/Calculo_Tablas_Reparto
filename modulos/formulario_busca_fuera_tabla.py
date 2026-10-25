@@ -19,7 +19,9 @@ from modulos.componente_pedido_trabajo import ComponentePedidoTrabajo
 from modulos.gestor_grutiep_calculo import preparar_pedido_con_grutiep_para_tablas
 from modulos.ventanas_tk import crear_marco_scrollable
 from modulos.dialogo_progreso import DialogoProgreso
+from modulos.repeticion_tiendas import preguntar_durante_progreso
 from modulos.gestor_reset_calculos import GestorResetCalculos
+from modulos.formulario_editor_lados_cortos_domingo import EditorLadosCortosDomingo
 
 
 class FormularioBuscaFueraTabla:
@@ -47,6 +49,8 @@ class FormularioBuscaFueraTabla:
         self.configuracion_paises = self.configuracion_paises_vacia()
 
         self.tamano_bloque = tk.StringVar(value="10")
+        # V2.4: modo domingo, lados cortos elegidos a mano.
+        self.modo_domingo = tk.BooleanVar(value=False)
 
         self.ventana = tk.Toplevel(ventana_padre)
         self.ventana.title("Busca Fuera de Tabla")
@@ -402,6 +406,18 @@ class FormularioBuscaFueraTabla:
             anchor="w",
         )
         self.lbl_paises.grid(row=0, column=3, sticky="w", padx=8, pady=4)
+
+        tk.Checkbutton(
+            marco,
+            text=(
+                "MODO DOMINGO: calcular como siempre y despues mover a mano las "
+                "tiendas de los lados cortos (con informacion de tipo de caja)"
+            ),
+            variable=self.modo_domingo,
+            font=("Arial", 10, "bold"),
+            fg="#7f6000",
+            anchor="w",
+        ).grid(row=1, column=0, columnspan=4, sticky="w", padx=4, pady=(8, 2))
 
     #---------------------------------------------------------
     # Bloque acciones
@@ -1097,11 +1113,60 @@ class FormularioBuscaFueraTabla:
                 self.motor.bd.conexion
             )
 
-            progreso.actualizar(mensaje="Calculando nuevas asignaciones fuera de tabla...")
-            resumen = self.motor.calcular_y_guardar(
-                self.configuracion_paises,
-                self.obtener_tamano_bloque(),
+            # V2.5: solo las tiendas NUEVAS (fuera de tabla) se pueden repetir.
+            filas_nuevas = [
+                (r["Tienda"], r["Aparte"], r["Lotes"], r["Pais"], r["TipoCaja"])
+                for r in self.motor.fuera_tabla
+            ]
+            libres = getattr(self.motor, "libres_utilizables", {}) or {}
+            repeticiones, progreso = preguntar_durante_progreso(
+                progreso,
+                lambda: DialogoProgreso(
+                    self.ventana,
+                    titulo="Calculando Busca Fuera de Tabla",
+                    mensaje="Calculando nuevas asignaciones fuera de tabla...",
+                ),
+                self.ventana,
+                self.motor.bd.conexion,
+                filas_nuevas,
+                capacidad=(int(libres.get(1, 0)) + int(libres.get(2, 0))) or None,
+                contexto="Busca fuera de tabla (solo tiendas nuevas)",
             )
+            if repeticiones is None:
+                return
+
+            if self.modo_domingo.get():
+                # Calculo igual que siempre y despues ajuste manual de los
+                # lados cortos en el editor.
+                progreso.actualizar(mensaje="Modo domingo: calculando como siempre...")
+                self.motor.calcular_domingo(
+                    self.configuracion_paises,
+                    self.obtener_tamano_bloque(),
+                    repeticiones=repeticiones,
+                )
+                # El editor es modal: se oculta el progreso mientras se usa.
+                progreso.cerrar()
+                editor = EditorLadosCortosDomingo(self.ventana, self.motor)
+                if not editor.ejecutar():
+                    messagebox.showinfo(
+                        "Modo domingo cancelado",
+                        "No se ha guardado ni exportado nada. Puedes volver a calcular.",
+                        parent=self.ventana,
+                    )
+                    return
+                progreso = DialogoProgreso(
+                    self.ventana,
+                    titulo="Calculando Busca Fuera de Tabla",
+                    mensaje="Guardando modo domingo...",
+                )
+                resumen = self.motor.finalizar_domingo()
+            else:
+                progreso.actualizar(mensaje="Calculando nuevas asignaciones fuera de tabla...")
+                resumen = self.motor.calcular_y_guardar(
+                    self.configuracion_paises,
+                    self.obtener_tamano_bloque(),
+                    repeticiones=repeticiones,
+                )
 
             progreso.actualizar(mensaje="Exportando tablas de reparto...")
             archivos = exportar_tablas_reparto_csv(

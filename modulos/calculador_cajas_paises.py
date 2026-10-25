@@ -172,7 +172,16 @@ class CalculadorCajasPaises:
     # ---------------------------------------------------------
     # Calculo por pais
     # ---------------------------------------------------------
-    def calcular(self):
+    def calcular(self, desglose_tiendas=None):
+        """desglose_tiendas: Tienda -> TipoCaja final (V2.7).
+
+        Las tiendas incluidas (paises con dos tipos de caja) se calculan en una
+        linea por Pais + TipoCaja, porque cada tipo lleva sus propias cajas.
+        """
+        desglose_tiendas = {
+            self._entero(t, None): str(tipo or "").strip()
+            for t, tipo in (desglose_tiendas or {}).items()
+        }
         indices = self._cargar_volumetria()
         pais_por_tienda = self._cargar_paises_tienda()
 
@@ -268,23 +277,34 @@ class CalculadorCajasPaises:
                     continue
 
             volumen = volumen_unitario * unidades
-            volumen_pais[pais] += volumen
-            unidades_pais[pais] += unidades
-            skus_pais[pais].add(sku)
+            clave_linea = pais
+            if tienda_num in desglose_tiendas:
+                clave_linea = (pais, desglose_tiendas[tienda_num])
+            volumen_pais[clave_linea] += volumen
+            unidades_pais[clave_linea] += unidades
+            skus_pais[clave_linea].add(sku)
 
         resultados = []
-        for pais in volumen_pais.keys():
-            volumen = float(volumen_pais[pais])
+        for clave_linea in volumen_pais.keys():
+            pais = clave_linea
+            tipo_fijo = ""
+            if isinstance(clave_linea, tuple):
+                pais, tipo_fijo = clave_linea
+            volumen = float(volumen_pais[clave_linea])
             cajas_300 = int(math.ceil(max(0.0, volumen - 1e-12) / self.VOLUMEN_CAJA_300_M3)) if volumen > 0 else 0
             cajas_400 = int(math.ceil(max(0.0, volumen - 1e-12) / self.VOLUMEN_CAJA_400_M3)) if volumen > 0 else 0
-            resultados.append({
+            fila = {
                 "Pais": pais,
                 "VolumenM3": volumen,
                 "Cajas300": cajas_300,
                 "Cajas400": cajas_400,
-                "Unidades": int(unidades_pais[pais]),
-                "Skus": len(skus_pais[pais]),
-            })
+                "Unidades": int(unidades_pais[clave_linea]),
+                "Skus": len(skus_pais[clave_linea]),
+            }
+            if tipo_fijo:
+                fila["TipoFijo"] = tipo_fijo
+                fila["Clave"] = pais + "|" + tipo_fijo
+            resultados.append(fila)
 
         # La tabla del formulario debe presentar primero los paises que mas
         # cajas 400 necesitan. El desempate se realiza por volumen y pais para
@@ -319,6 +339,26 @@ class CalculadorCajasPaises:
 
     @classmethod
     def ordenar_paises(cls, paises):
+        ordenados = cls._ordenar_paises_base(paises)
+        # Las lineas de un mismo pais desglosado por tipo de caja van juntas.
+        resultado = []
+        colocados = set()
+        for fila in ordenados:
+            if not fila.get("TipoFijo"):
+                resultado.append(fila)
+                continue
+            pais = cls.normalizar_pais(fila.get("Pais", ""))
+            if pais in colocados:
+                continue
+            colocados.add(pais)
+            resultado.extend(
+                f for f in ordenados
+                if f.get("TipoFijo") and cls.normalizar_pais(f.get("Pais", "")) == pais
+            )
+        return resultado
+
+    @classmethod
+    def _ordenar_paises_base(cls, paises):
         return sorted(
             list(paises or []),
             key=lambda fila: (

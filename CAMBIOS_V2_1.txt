@@ -1,0 +1,69 @@
+CALCULO TABLAS REPARTO - V2.1
+Fecha: 18/10/2026
+
+OBJETIVO
+========
+Calculo de cajas admite varios pedidos importados a la vez. Al importar cada
+pedido se pregunta si se calculan picos en ese pedido.
+
+REGLAS
+======
+1. Cada pedido importado se AÑADE a los anteriores (no los sustituye).
+2. Al importar se pregunta "¿Calcular picos en este pedido?":
+   - SI: sus lineas entran en el filtro "Descartar SKU con unidades < N".
+   - NO: se conservan todas sus lineas.
+   - Cancelar: el pedido no se añade.
+3. El umbral N es unico (el campo del formulario) para todos los pedidos.
+4. Para saber si un SKU llega a N se suman las unidades de TODOS los pedidos
+   marcados con picos, sin contar las tiendas fijas.
+5. Las tiendas fijas siguen igual: nunca pierden lineas, vengan del pedido que
+   vengan. Solo se eliminan si pertenecen al grupo excluido de un escenario.
+6. Si se importa otra vez el mismo fichero (mismo nombre, lineas y unidades) se
+   avisa, porque sus unidades se sumarian dos veces.
+
+FORMULARIO CALCULO DE CAJAS
+===========================
+- Bloque FICHEROS CARGADOS con la lista de pedidos: numero, fichero, picos
+  SI/NO, tiendas, unidades, lotes y fecha (amarillo = con picos, verde = sin).
+- Botones: Cambiar picos SI/NO, Quitar pedido seleccionado, Vaciar todos los
+  pedidos.
+- El resumen del filtro muestra pedidos con/sin picos y las unidades de los
+  pedidos sin picos que se conservan.
+- RESETEAR CALCULO borra tambien todos los pedidos de la lista.
+
+CAMBIO TECNICO
+==============
+- Nueva tabla CAJAS_PEDIDO_LINEAS (columnas de ESTAREPP + IdPedido +
+  CalcularPicos) y CAJAS_PEDIDOS_IMPORTADOS (lista de pedidos).
+- Calculo de cajas, escenarios, pedido activo/descartado, tiendas fijas,
+  volumetria por pais y exportacion sin volumetria leen CAJAS_PEDIDO_LINEAS.
+  Importar un pedido en otro formulario YA NO cambia el pedido de Calculo de
+  cajas.
+- Regla unica del filtro: gestor_pedidos_cajas.linea_eliminada_por_picos().
+- Primera apertura: el pedido que hubiera en la version anterior se pasa a la
+  lista como pedido 1 con picos SI y el texto "(version anterior)".
+
+ARCHIVOS
+========
+Nuevos:
+- modulos/gestor_pedidos_cajas.py
+- tests/test_gestor_pedidos_cajas_v2_1.py
+Modificados:
+- modulos/formulario_calculo_cajas_pedido.py
+- modulos/motor_calculo_cajas_pedido.py
+- modulos/calculador_escenarios_cajas.py
+- modulos/gestor_pedido_escenario_activo.py
+- modulos/gestor_tiendas_fijas_cajas.py
+- modulos/gestor_reset_calculos.py
+- modulos/exportar_sin_volumetria.py
+- modulos/formulario_volumetria_reutilizacion_paises.py
+- modulos/version_aplicacion.py (2.1)
+- compilar_calculo_tablas_reparto.bat (version 2.1 + hidden-import nuevo)
+
+PRUEBAS
+=======
+- 30 pruebas automaticas OK (21 anteriores + 9 nuevas).
+- Con la reparto.db real (umbral 30): un pedido con picos da exactamente el
+  mismo resultado que V2.0 (107.335 uds, 201 cajas XDC, 2.416 cajas silo); el
+  mismo pedido partido en dos pedidos con picos da el mismo resultado; con un
+  pedido sin picos la demanda coincide con un calculo independiente de la regla.

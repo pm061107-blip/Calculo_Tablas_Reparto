@@ -18,6 +18,7 @@ from modulos.componente_pedido_trabajo import ComponentePedidoTrabajo
 from modulos.gestor_grutiep_calculo import preparar_pedido_con_grutiep_para_tablas
 from modulos.ventanas_tk import crear_marco_scrollable
 from modulos.dialogo_progreso import DialogoProgreso
+from modulos.repeticion_tiendas import capacidad_clasificadores, preguntar_durante_progreso
 from modulos.gestor_reset_calculos import GestorResetCalculos
 
 
@@ -686,17 +687,36 @@ class FormularioRepartoBase:
             )
             clave_calculo = preparacion_grutiep["ClavePedidoTrabajo"]
 
-            progreso.actualizar(mensaje="Calculando reparto y asignando destinos...")
             motor = MotorReparto(
                 clave_pedido_trabajo=clave_calculo
             )
 
+            # V2.5: tiendas/apartes que superan el umbral de lotes
+            motor.cargar_tmp()
+            repeticiones, progreso = preguntar_durante_progreso(
+                progreso,
+                lambda: DialogoProgreso(
+                    self.ventana,
+                    titulo="Calculando reparto",
+                    mensaje="Calculando reparto y asignando destinos...",
+                ),
+                self.ventana,
+                self.bd.conexion,
+                motor.tmp,
+                capacidad=capacidad_clasificadores(self.bd.conexion, clasificadores),
+                contexto=self.titulo,
+            )
+            if repeticiones is None:
+                return None
+
+            progreso.actualizar(mensaje="Calculando reparto y asignando destinos...")
             resumen_motor = motor.reparto_general(
                 clasificadores,
                 self.obtener_tamano_bloque(),
                 prioridad,
                 configuracion_paises,
-                configuracion_prioridad_paises
+                configuracion_prioridad_paises,
+                repeticiones=repeticiones,
             )
 
             progreso.actualizar(mensaje="Exportando tablas de reparto...")

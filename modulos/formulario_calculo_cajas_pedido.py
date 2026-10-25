@@ -21,6 +21,7 @@ from modulos.gestor_tiendas_fijas_cajas import (
 from modulos.gestor_pedido_escenario_activo import (
     GestorPedidoEscenarioActivo,
 )
+from modulos.gestor_pedidos_cajas import GestorPedidosCajas
 from modulos.ventanas_tk import forzar_ventana_visible, crear_marco_scrollable
 from modulos.dialogo_progreso import DialogoProgreso
 from modulos.gestor_reset_calculos import GestorResetCalculos
@@ -38,6 +39,8 @@ class FormularioCalculoCajasPedido:
         self.gestor_tipo_caja_pais = GestorTipoCajaPais(
             conexion=self.bd.conexion
         )
+        # V2.1: pedidos acumulados de Calculo de cajas con su marca de picos.
+        self.gestor_pedidos_cajas = GestorPedidosCajas(self.bd.conexion)
         self.ventana_padre = ventana_padre
 
         self.tipo_pedido = None
@@ -163,7 +166,7 @@ class FormularioCalculoCajasPedido:
         contenedor = contenedor or self.ventana
         marco = tk.LabelFrame(
             contenedor,
-            text="FICHEROS CARGADOS - ULTIMA IMPORTACION",
+            text="FICHEROS CARGADOS",
             font=("Arial", 11, "bold"),
             padx=10,
             pady=8,
@@ -194,13 +197,15 @@ class FormularioCalculoCajasPedido:
 
         self.lbl_pedido = tk.Label(
             marco,
-            text="Pedido: sin cargar",
+            text="Pedidos: ninguno importado",
             anchor="w",
             justify="left",
             font=("Arial", 9, "bold"),
             wraplength=510,
         )
         self.lbl_pedido.grid(row=1, column=0, sticky="ew", pady=1)
+
+        self.crear_tabla_pedidos(marco, fila=2)
 
         self.lbl_volumetria = tk.Label(
             marco,
@@ -210,7 +215,7 @@ class FormularioCalculoCajasPedido:
             font=("Arial", 9, "bold"),
             wraplength=510,
         )
-        self.lbl_volumetria.grid(row=2, column=0, sticky="ew", pady=1)
+        self.lbl_volumetria.grid(row=3, column=0, sticky="ew", pady=1)
 
         self.lbl_contenedores = tk.Label(
             marco,
@@ -220,7 +225,237 @@ class FormularioCalculoCajasPedido:
             font=("Arial", 9, "bold"),
             wraplength=510,
         )
-        self.lbl_contenedores.grid(row=3, column=0, sticky="ew", pady=1)
+        self.lbl_contenedores.grid(row=4, column=0, sticky="ew", pady=1)
+
+    # ---------------------------------------------------------
+    # V2.1 - Lista de pedidos importados con marca de picos
+    # ---------------------------------------------------------
+    def crear_tabla_pedidos(self, marco, fila):
+        zona = tk.Frame(marco)
+        zona.grid(row=fila, column=0, sticky="ew", pady=(2, 5))
+        zona.grid_columnconfigure(0, weight=1)
+
+        contenedor_tabla = tk.Frame(zona)
+        contenedor_tabla.grid(row=0, column=0, sticky="ew")
+        contenedor_tabla.grid_columnconfigure(0, weight=1)
+
+        columnas = ("Num", "Fichero", "Picos", "Tiendas", "Unidades", "Lotes", "Fecha")
+        self.tabla_pedidos = ttk.Treeview(
+            contenedor_tabla,
+            columns=columnas,
+            show="headings",
+            selectmode="extended",
+            height=4,
+        )
+        cabeceras = {
+            "Num": ("N.", 34, "center"),
+            "Fichero": ("FICHERO", 150, "w"),
+            "Picos": ("PICOS", 52, "center"),
+            "Tiendas": ("TIENDAS", 60, "e"),
+            "Unidades": ("UNIDADES", 72, "e"),
+            "Lotes": ("LOTES", 64, "e"),
+            "Fecha": ("IMPORTADO", 120, "center"),
+        }
+        for columna, (texto, ancho, alineacion) in cabeceras.items():
+            self.tabla_pedidos.heading(columna, text=texto)
+            self.tabla_pedidos.column(
+                columna,
+                width=ancho,
+                anchor=alineacion,
+                stretch=(columna == "Fichero"),
+            )
+        self.tabla_pedidos.tag_configure("con_picos", background="#fff2cc")
+        self.tabla_pedidos.tag_configure("sin_picos", background="#d9ead3")
+        self.tabla_pedidos.grid(row=0, column=0, sticky="ew")
+
+        scroll_y = ttk.Scrollbar(
+            contenedor_tabla,
+            orient="vertical",
+            command=self.tabla_pedidos.yview,
+        )
+        scroll_y.grid(row=0, column=1, sticky="ns")
+        self.tabla_pedidos.configure(yscrollcommand=scroll_y.set)
+
+        botones = tk.Frame(zona)
+        botones.grid(row=1, column=0, sticky="ew", pady=(4, 0))
+        for columna in range(3):
+            botones.grid_columnconfigure(columna, weight=1)
+
+        self.btn_cambiar_picos_pedido = tk.Button(
+            botones,
+            text="Cambiar picos SI/NO",
+            command=self.cambiar_picos_pedido,
+        )
+        self.btn_cambiar_picos_pedido.grid(row=0, column=0, padx=(0, 4), sticky="ew")
+        self.btn_quitar_pedido = tk.Button(
+            botones,
+            text="Quitar pedido seleccionado",
+            command=self.quitar_pedidos_seleccionados,
+        )
+        self.btn_quitar_pedido.grid(row=0, column=1, padx=4, sticky="ew")
+        self.btn_vaciar_pedidos = tk.Button(
+            botones,
+            text="Vaciar todos los pedidos",
+            command=self.vaciar_pedidos,
+        )
+        self.btn_vaciar_pedidos.grid(row=0, column=2, padx=(4, 0), sticky="ew")
+
+        tk.Label(
+            zona,
+            text=(
+                "PICOS SI: sus lineas entran en el filtro 'Descartar SKU con unidades < N' "
+                "(sumando todos los pedidos con picos). PICOS NO: se conservan todas sus lineas. "
+                "Las tiendas fijas nunca pierden lineas."
+            ),
+            font=("Arial", 8),
+            anchor="w",
+            justify="left",
+            wraplength=510,
+        ).grid(row=2, column=0, sticky="ew", pady=(3, 0))
+
+    def refrescar_tabla_pedidos(self):
+        if not hasattr(self, "tabla_pedidos"):
+            return
+        for item in self.tabla_pedidos.get_children():
+            self.tabla_pedidos.delete(item)
+
+        try:
+            pedidos = self.gestor_pedidos_cajas.obtener_pedidos()
+            resumen = self.gestor_pedidos_cajas.resumen()
+        except Exception as error:
+            self.lbl_pedido.config(text="Pedidos: no se pudo consultar (" + str(error) + ")")
+            return
+
+        for numero, pedido in enumerate(pedidos, start=1):
+            self.tabla_pedidos.insert(
+                "",
+                "end",
+                iid=str(pedido["IdPedido"]),
+                values=(
+                    numero,
+                    pedido["NombreArchivo"],
+                    "SI" if pedido["CalcularPicos"] else "NO",
+                    pedido["Tiendas"],
+                    pedido["Unidades"],
+                    self._formatear_lotes(pedido["Lotes"]),
+                    self._formatear_fecha(pedido["FechaHora"]),
+                ),
+                tags=("con_picos" if pedido["CalcularPicos"] else "sin_picos",),
+            )
+
+        if resumen["Pedidos"] <= 0:
+            self.lbl_pedido.config(text="Pedidos: ninguno importado")
+            return
+
+        self.lbl_pedido.config(
+            text=(
+                "Pedidos: " + str(resumen["Pedidos"])
+                + " | con picos: " + str(resumen["ConPicos"])
+                + " | sin picos: " + str(resumen["SinPicos"])
+                + " | unidades: " + str(resumen["Unidades"])
+                + " | lotes: " + self._formatear_lotes(resumen["Lotes"])
+            )
+        )
+
+    def _ids_pedidos_seleccionados(self):
+        if not hasattr(self, "tabla_pedidos"):
+            return []
+        return [int(item) for item in self.tabla_pedidos.selection()]
+
+    def preguntar_calcular_picos(self, nombre_archivo, estadisticas):
+        """Devuelve True (picos), False (sin picos) o None (cancelar)."""
+        return messagebox.askyesnocancel(
+            "Calcular picos en este pedido",
+            "Pedido: " + str(nombre_archivo)
+            + "\nTiendas: " + str(estadisticas.get("Tiendas", 0))
+            + " | Unidades: " + str(estadisticas.get("Unidades", 0))
+            + " | Lotes: " + self._formatear_lotes(estadisticas.get("Lotes", 0))
+            + "\n\n¿Quieres CALCULAR PICOS en este pedido?\n\n"
+            "SI: sus lineas entran en el filtro 'Descartar SKU con unidades < N'. "
+            "Para saber si un SKU llega a N se suman todos los pedidos con picos.\n"
+            "NO: se conservan todas las lineas de este pedido.\n\n"
+            "En los dos casos las tiendas fijas conservan todas sus lineas.\n\n"
+            "Cancelar: no se añade este pedido.",
+            parent=self.ventana,
+        )
+
+    def cambiar_picos_pedido(self):
+        ids = self._ids_pedidos_seleccionados()
+        if len(ids) != 1:
+            messagebox.showwarning(
+                "Selecciona un pedido",
+                "Selecciona un unico pedido en la lista para cambiar su marca de picos.",
+                parent=self.ventana,
+            )
+            return
+        pedido = self.gestor_pedidos_cajas.obtener_pedido(ids[0])
+        if pedido is None:
+            self.refrescar_tabla_pedidos()
+            return
+        nuevo = not pedido["CalcularPicos"]
+        if not messagebox.askyesno(
+            "Cambiar picos",
+            "Pedido: " + pedido["NombreArchivo"]
+            + "\n\nPicos actual: " + ("SI" if pedido["CalcularPicos"] else "NO")
+            + "\nPicos nuevo: " + ("SI" if nuevo else "NO")
+            + "\n\nSe invalidara el calculo actual. ¿Continuar?",
+            parent=self.ventana,
+        ):
+            return
+        try:
+            self.gestor_pedidos_cajas.cambiar_picos(ids[0], nuevo)
+            self.invalidar_resultados("ha cambiado la marca de picos de un pedido")
+            self.cargar_estado_importaciones()
+        except Exception as error:
+            messagebox.showerror("Error cambiando picos", str(error), parent=self.ventana)
+
+    def quitar_pedidos_seleccionados(self):
+        ids = self._ids_pedidos_seleccionados()
+        if not ids:
+            messagebox.showwarning(
+                "Selecciona un pedido",
+                "Selecciona en la lista el pedido o pedidos que quieres quitar.",
+                parent=self.ventana,
+            )
+            return
+        nombres = []
+        for id_pedido in ids:
+            pedido = self.gestor_pedidos_cajas.obtener_pedido(id_pedido)
+            if pedido is not None:
+                nombres.append("- " + pedido["NombreArchivo"])
+        if not messagebox.askyesno(
+            "Quitar pedidos",
+            "Se quitaran de Calculo de cajas:\n\n" + "\n".join(nombres)
+            + "\n\nSe invalidara el calculo actual. ¿Continuar?",
+            parent=self.ventana,
+        ):
+            return
+        try:
+            self.gestor_pedidos_cajas.eliminar(ids)
+            self.invalidar_resultados("se han quitado pedidos")
+            self.cargar_estado_importaciones()
+            self.cargar_tiendas_fijas(invalidar=False)
+        except Exception as error:
+            messagebox.showerror("Error quitando pedidos", str(error), parent=self.ventana)
+
+    def vaciar_pedidos(self):
+        if self.gestor_pedidos_cajas.resumen()["Pedidos"] <= 0:
+            return
+        if not messagebox.askyesno(
+            "Vaciar pedidos",
+            "Se quitaran TODOS los pedidos importados en Calculo de cajas.\n\n"
+            "Contenedores, volumetria, grupos y tiendas fijas se conservan.\n\n"
+            "¿Continuar?",
+            parent=self.ventana,
+        ):
+            return
+        try:
+            self.gestor_pedidos_cajas.vaciar()
+            self.invalidar_resultados("se han vaciado los pedidos")
+            self.cargar_estado_importaciones()
+            self.cargar_tiendas_fijas(invalidar=False)
+        except Exception as error:
+            messagebox.showerror("Error vaciando pedidos", str(error), parent=self.ventana)
 
     def _formatear_fecha(self, fecha):
         texto = str(fecha or "").strip()
@@ -239,12 +474,11 @@ class FormularioCalculoCajasPedido:
     def cargar_estado_importaciones(self):
         metadatos = self.registro_importaciones.todos()
 
-        pedido_count = self.contar_tabla("ESTAREPP")
         volum_count = self.contar_tabla("CAJAS_VOLUMETRIA")
         cont_count = self.contar_tabla("CAJAS_CONTENEDORES")
         disponibles = self.contar_contenedores_disponibles()
 
-        self.lbl_pedido.config(text=self._texto_estado_importacion("PEDIDO", metadatos.get("PEDIDO"), pedido_count))
+        self.refrescar_tabla_pedidos()
         self.lbl_volumetria.config(text=self._texto_estado_importacion("VOLUMETRIA", metadatos.get("VOLUMETRIA"), volum_count))
         self.lbl_contenedores.config(
             text=self._texto_estado_importacion("CONTENEDORES", metadatos.get("CONTENEDORES"), cont_count, " | disponibles: " + str(disponibles))
@@ -340,17 +574,79 @@ class FormularioCalculoCajasPedido:
         )
 
     def importar_pedido(self):
+        """V2.1: cada pedido importado se AÑADE a los anteriores.
+
+        Tras leer el fichero se pregunta si ese pedido calcula picos. La
+        respuesta se guarda en cada una de sus lineas.
+        """
         try:
             importador = ImportadorPedidos(parent=self.ventana)
             tipo = importador.importar()
             if tipo is None:
                 return
-            registros = self.contar_tabla("ESTAREPP")
+
+            nombre_archivo = (
+                importador.ruta.name
+                if getattr(importador, "ruta", None) is not None
+                else str(tipo)
+            )
+            estadisticas = self.gestor_pedidos_cajas.estadisticas_estarepp()
+            if estadisticas["Registros"] <= 0:
+                messagebox.showwarning(
+                    "Pedido vacio",
+                    "El fichero no contiene lineas de pedido. No se ha añadido.",
+                    parent=self.ventana,
+                )
+                return
+
+            duplicado = self.gestor_pedidos_cajas.buscar_duplicado(
+                nombre_archivo, estadisticas
+            )
+            if duplicado is not None and not messagebox.askyesno(
+                "Pedido ya importado",
+                "El fichero " + nombre_archivo
+                + " ya esta en la lista con las mismas lineas y unidades "
+                + "(importado " + self._formatear_fecha(duplicado["FechaHora"]) + ").\n\n"
+                + "Si lo añades otra vez, sus unidades se sumaran dos veces.\n\n"
+                + "¿Añadirlo de todas formas?",
+                parent=self.ventana,
+            ):
+                return
+
+            calcular_picos = self.preguntar_calcular_picos(nombre_archivo, estadisticas)
+            if calcular_picos is None:
+                messagebox.showinfo(
+                    "Pedido no añadido",
+                    "Importacion cancelada. La lista de pedidos no ha cambiado.",
+                    parent=self.ventana,
+                )
+                return
+
+            pedido = self.gestor_pedidos_cajas.anadir_desde_estarepp(
+                nombre_archivo=nombre_archivo,
+                ruta=importador.ruta,
+                tipo_fichero=tipo,
+                calcular_picos=bool(calcular_picos),
+            )
             self.tipo_pedido = tipo
-            self.registro_importaciones.guardar("PEDIDO", importador.ruta, registros, tipo)
-            self.invalidar_resultados()
+            self.registro_importaciones.guardar(
+                "PEDIDO", importador.ruta, estadisticas["Registros"], tipo
+            )
+            self.invalidar_resultados("se ha añadido un pedido")
             self.cargar_estado_importaciones()
-            messagebox.showinfo("Pedido importado", "Pedido importado correctamente.", parent=self.ventana)
+            self.cargar_tiendas_fijas(invalidar=False)
+
+            resumen = self.gestor_pedidos_cajas.resumen()
+            messagebox.showinfo(
+                "Pedido añadido",
+                "Pedido añadido: " + pedido["NombreArchivo"]
+                + "\nPicos: " + ("SI" if pedido["CalcularPicos"] else "NO")
+                + "\n\nPedidos en Calculo de cajas: " + str(resumen["Pedidos"])
+                + " (con picos: " + str(resumen["ConPicos"])
+                + ", sin picos: " + str(resumen["SinPicos"]) + ")"
+                + "\nUnidades totales: " + str(resumen["Unidades"]),
+                parent=self.ventana,
+            )
         except Exception as error:
             messagebox.showerror("Error importando pedido", str(error), parent=self.ventana)
 
@@ -405,7 +701,7 @@ class FormularioCalculoCajasPedido:
         if not messagebox.askyesno(
             "Resetear calculo de cajas",
             "Se eliminaran del formulario de calculo de cajas:\n\n"
-            "- Pedido importado\n"
+            "- Todos los pedidos importados\n"
             "- Contenedores importados\n"
             "- Resultados de cajas y escenario global derivado\n\n"
             "La volumetria SKU se conserva y solo se sustituira cuando importes otro fichero.\n\n"
@@ -1290,6 +1586,9 @@ class FormularioCalculoCajasPedido:
             self.btn_eliminar_tiendas_fijas,
             self.btn_reemplazar_tiendas_fijas,
             self.btn_vaciar_tiendas_fijas,
+            getattr(self, "btn_cambiar_picos_pedido", None),
+            getattr(self, "btn_quitar_pedido", None),
+            getattr(self, "btn_vaciar_pedidos", None),
         ]:
             try:
                 control.config(state=estado)
@@ -1341,7 +1640,12 @@ class FormularioCalculoCajasPedido:
         umbral = int(filtro.get("Umbral", 0) or 0)
         self.lbl_filtro_sku.config(
             text=(
-                "Filtro de picos solo sobre tiendas normales: descartar SKU con unidades < "
+                "Pedidos: " + str(filtro.get("Pedidos", 0))
+                + " (con picos: " + str(filtro.get("PedidosConPicos", 0))
+                + ", sin picos: " + str(filtro.get("PedidosSinPicos", 0))
+                + ") | unidades de pedidos sin picos conservadas: "
+                + str(filtro.get("UnidadesSinPicos", 0))
+                + "\nFiltro de picos sobre pedidos con picos y tiendas no fijas: descartar SKU con unidades < "
                 + str(umbral)
                 + " | SKU evaluados: "
                 + str(filtro.get("SkusIniciales", 0))
@@ -1750,7 +2054,7 @@ class FormularioCalculoCajasPedido:
         self.lbl_total_general.grid(row=4, column=0, sticky="ew", pady=(1, 0))
 
     def validar_calculo_cajas(self):
-        if self.contar_tabla("ESTAREPP") <= 0:
+        if self.contar_tabla("CAJAS_PEDIDO_LINEAS") <= 0:
             messagebox.showwarning("Falta pedido", "Primero debes importar el pedido.", parent=self.ventana)
             return False
         if self.contar_tabla("CAJAS_CONTENEDORES") <= 0:
@@ -1916,7 +2220,7 @@ class FormularioCalculoCajasPedido:
             self.ventana_volumetria.traer_al_frente()
             return
 
-        if self.contar_tabla("ESTAREPP") <= 0:
+        if self.contar_tabla("CAJAS_PEDIDO_LINEAS") <= 0:
             messagebox.showwarning(
                 "Falta pedido",
                 "Primero debes importar el pedido antes de abrir la volumetria por pais.",

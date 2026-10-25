@@ -160,7 +160,7 @@ class GestorTiendasFijasCajas:
                 ) AS Nombre,
                 CASE WHEN EXISTS (
                     SELECT 1
-                    FROM ESTAREPP e
+                    FROM CAJAS_PEDIDO_LINEAS e
                     WHERE CAST(e.Tienda AS INTEGER) = f.Tienda
                 ) THEN 1 ELSE 0 END AS EnPedido
             FROM CAJAS_TIENDAS_FIJAS f

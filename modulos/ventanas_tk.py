@@ -431,3 +431,90 @@ def crear_marco_scrollable(parent, padx=0, pady=0, fondo=None):
     contenido._scroll_exterior = exterior
     contenido._scroll_barra = scroll
     return contenido
+
+
+# =========================================================
+# V2.7 - Adaptacion a la resolucion de cada PC
+#
+# Muchos formularios piden un tamano fijo (geometry / minsize) pensado para
+# una pantalla grande. En un PC con menos resolucion la ventana quedaba mas
+# grande que la pantalla y los botones fuera de la vista. Aqui se recortan
+# AUTOMATICAMENTE esos tamanos al area visible de la pantalla de cada PC, sin
+# tener que tocar cada formulario.
+# =========================================================
+MARGEN_BARRA_TAREAS = 60
+
+_PATRON_GEOMETRIA = None
+
+
+def _area_visible(ancho_pantalla, alto_pantalla):
+    return max(320, int(ancho_pantalla)), max(240, int(alto_pantalla) - MARGEN_BARRA_TAREAS)
+
+
+def ajustar_geometria_a_pantalla(texto, ancho_pantalla, alto_pantalla):
+    """'1400x940+10+20' -> mismo texto recortado al area visible."""
+    global _PATRON_GEOMETRIA
+    if _PATRON_GEOMETRIA is None:
+        import re
+        _PATRON_GEOMETRIA = re.compile(r"^(\d+)x(\d+)(?:\+(-?\d+)\+(-?\d+))?$")
+    if texto is None:
+        return texto
+    coincidencia = _PATRON_GEOMETRIA.match(str(texto).strip())
+    if not coincidencia:
+        return texto
+    max_ancho, max_alto = _area_visible(ancho_pantalla, alto_pantalla)
+    ancho = min(int(coincidencia.group(1)), max_ancho)
+    alto = min(int(coincidencia.group(2)), max_alto)
+    resultado = str(ancho) + "x" + str(alto)
+    if coincidencia.group(3) is not None:
+        x = max(0, min(int(coincidencia.group(3)), max_ancho - ancho))
+        y = max(0, min(int(coincidencia.group(4)), max_alto - alto))
+        resultado += "+" + str(x) + "+" + str(y)
+    return resultado
+
+
+def ajustar_minimo_a_pantalla(ancho, alto, ancho_pantalla, alto_pantalla):
+    max_ancho, max_alto = _area_visible(ancho_pantalla, alto_pantalla)
+    return min(int(ancho), int(max_ancho * 0.9)), min(int(alto), int(max_alto * 0.9))
+
+
+def instalar_adaptacion_pantalla():
+    """Recorta geometry() y minsize() de TODAS las ventanas a la pantalla."""
+    wm = getattr(tk, "Wm", None)
+    if wm is None or getattr(wm, "_adaptacion_pantalla_v27", False):
+        return
+    geometry_original = getattr(wm, "wm_geometry", None)
+    minsize_original = getattr(wm, "wm_minsize", None)
+    if geometry_original is None or minsize_original is None:
+        return
+
+    def wm_geometry(self, newGeometry=None):
+        if newGeometry:
+            try:
+                newGeometry = ajustar_geometria_a_pantalla(
+                    newGeometry, self.winfo_screenwidth(), self.winfo_screenheight()
+                )
+            except Exception:
+                pass
+        return geometry_original(self, newGeometry)
+
+    def wm_minsize(self, width=None, height=None):
+        if width is not None and height is not None:
+            try:
+                width, height = ajustar_minimo_a_pantalla(
+                    width, height, self.winfo_screenwidth(), self.winfo_screenheight()
+                )
+            except Exception:
+                pass
+        return minsize_original(self, width, height)
+
+    wm.wm_geometry = wm.geometry = wm_geometry
+    wm.wm_minsize = wm.minsize = wm_minsize
+    wm._adaptacion_pantalla_v27 = True
+
+
+try:
+    instalar_adaptacion_pantalla()
+except Exception:
+    pass
+

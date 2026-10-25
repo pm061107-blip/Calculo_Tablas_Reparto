@@ -221,6 +221,220 @@ class GestorTipoCajaPais:
         return resultados
 
     # ---------------------------------------------------------
+    # V2.6 - Paises con dos tipos de caja (TipoCajaPais + tiendas a mayores)
+    # ---------------------------------------------------------
+    def _cargar_tiendas_a_mayores(self):
+        try:
+            cursor = self.conexion.cursor()
+            cursor.execute("SELECT Tienda, TipoCaja FROM TipoCajaTiendaAMayores")
+            filas = cursor.fetchall()
+        except Exception:
+            return {}
+        resultado = {}
+        for tienda, tipo in filas:
+            clave_tienda = self._clave_tienda(tienda)
+            tipo = self.normalizar_tipo(tipo)
+            if clave_tienda is None or not tipo:
+                continue
+            resultado[clave_tienda] = tipo
+        return resultado
+
+    def _cargar_tipo_caja_pais_actual(self):
+        try:
+            cursor = self.conexion.cursor()
+            cursor.execute("SELECT Pais, TipoCajaPais FROM TipoCajaPais")
+            filas = cursor.fetchall()
+        except Exception:
+            return {}
+        resultado = {}
+        for pais, tipo in filas:
+            pais = self.normalizar_pais(pais)
+            tipo = self.normalizar_tipo(tipo)
+            if pais and tipo:
+                resultado[pais] = tipo
+        return resultado
+
+    @staticmethod
+    def _texto_conteo(conteo):
+        return ", ".join(
+            str(cantidad) + " " + str(tipo)
+            for tipo, cantidad in sorted(conteo.items(), key=lambda x: (-x[1], x[0]))
+        )
+
+    def analizar_tipos_finales(self, paises):
+        """Tipo de caja FINAL de las tiendas de cada pais.
+
+        Reproduce el orden de ProcesarESTAREPP: TipoCajaInicial -> homologacion
+        -> TipoCajaPais (todo el pais) -> TipoCajaTiendaAMayores (por tienda, es
+        el que manda al final). Cada pais se mira por separado: dos paises
+        distintos pueden tener tipos de caja distintos sin problema.
+
+        Devuelve Pais -> {
+            "Bloqueado": el pais YA queda con mas de un tipo de caja (con el
+                         maestro actual). No se puede elegir 300/400.
+            "Permite300" / "Permite400": esa opcion no crea dos tipos.
+            "Detalle", "Motivo", "TiposActuales", "TiendasAMayores", ...
+        }
+        """
+        claves = []
+        vistos = set()
+        for pais in paises or []:
+            clave = self.normalizar_pais(pais)
+            if clave and clave not in vistos:
+                vistos.add(clave)
+                claves.append(clave)
+        if not claves:
+            return {}
+
+        homologacion = self._cargar_homologacion()
+        pais_por_tienda = self._cargar_pais_por_tienda()
+        tipo_por_tienda = self._cargar_tipo_inicial_por_tienda()
+        a_mayores = self._cargar_tiendas_a_mayores()
+        tipo_pais_actual = self._cargar_tipo_caja_pais_actual()
+
+        seleccion = set(claves)
+        resto = {pais: Counter() for pais in claves}
+        mayores = {pais: Counter() for pais in claves}
+        ejemplos_mayores = {pais: defaultdict(list) for pais in claves}
+        ejemplos_resto = {pais: defaultdict(list) for pais in claves}
+
+        for tienda, pais in pais_por_tienda.items():
+            if pais not in seleccion:
+                continue
+            if tienda in a_mayores:
+                tipo = a_mayores[tienda]
+                mayores[pais][tipo] += 1
+                if len(ejemplos_mayores[pais][tipo]) < 15:
+                    ejemplos_mayores[pais][tipo].append(tienda)
+                continue
+            tipo_texto = self.normalizar_tipo(tipo_por_tienda.get(tienda, ""))
+            if not tipo_texto:
+                continue
+            tipo = homologacion.get(tipo_texto.upper(), tipo_texto)
+            resto[pais][tipo] += 1
+            if len(ejemplos_resto[pais][tipo]) < 15:
+                ejemplos_resto[pais][tipo].append(tienda)
+
+        resultado = {}
+        for pais in claves:
+            tipos_resto = set(resto[pais])
+            tipos_mayores = set(mayores[pais])
+            familias_resto = {self.familia_tipo(t) for t in tipos_resto} - {None}
+            if len(familias_resto) == 1:
+                familia = next(iter(familias_resto))
+                tipo_400 = TIPO_NUEVA_400 if familia == "NUEVA" else TIPO_USADA_400
+            else:
+                tipo_400 = ""
+
+            actual = tipo_pais_actual.get(pais, "")
+            # Opcion 300: el pais no esta en TipoCajaPais.
+            finales_300 = tipos_resto | tipos_mayores
+            # Opcion 400: todo el pais al tipo 400 salvo las tiendas a mayores.
+            finales_400 = ({tipo_400} if tipo_400 else set()) | tipos_mayores
+            if actual:
+                finales_actuales = ({actual} if (tipos_resto or not tipos_mayores) else set()) | tipos_mayores
+            else:
+                finales_actuales = finales_300
+
+            bloqueado = bool(tipos_mayores) and len(finales_actuales) > 1
+            permite_300 = not (tipos_mayores and len(finales_300) > 1)
+            permite_400 = not (tipos_mayores and len(finales_400) > 1)
+
+            conteo_actual = Counter()
+            for tipo, cantidad in mayores[pais].items():
+                conteo_actual[tipo] += cantidad
+            if actual:
+                total_resto = sum(resto[pais].values())
+                if total_resto:
+                    conteo_actual[actual] += total_resto
+            else:
+                for tipo, cantidad in resto[pais].items():
+                    conteo_actual[tipo] += cantidad
+
+            detalle = ""
+            if tipos_mayores:
+                detalle = (
+                    "Tiendas a mayores: " + self._texto_conteo(mayores[pais])
+                    + " | resto del pais: "
+                    + (
+                        (str(sum(resto[pais].values())) + " " + actual + " (TipoCajaPais)")
+                        if actual and resto[pais]
+                        else (self._texto_conteo(resto[pais]) or "sin tiendas")
+                    )
+                )
+
+            if bloqueado:
+                motivo = "BLOQUEADO: 2 TIPOS DE CAJA"
+            elif not permite_300 and permite_400:
+                motivo = "SOLO 400: con 300 quedaria con 2 tipos"
+            elif not permite_400 and permite_300:
+                motivo = "SOLO 300: con 400 quedaria con 2 tipos"
+            elif not permite_300 and not permite_400:
+                motivo = "BLOQUEADO: 2 TIPOS DE CAJA"
+                bloqueado = True
+            else:
+                motivo = ""
+
+            resultado[pais] = {
+                "Pais": pais,
+                "Bloqueado": bloqueado,
+                "Permite300": permite_300 and not bloqueado,
+                "Permite400": permite_400 and not bloqueado,
+                "Motivo": motivo,
+                "Detalle": detalle,
+                "TipoCajaPaisActual": actual,
+                "TiposActuales": dict(conteo_actual),
+                "TiendasAMayores": dict(mayores[pais]),
+                "TiendasResto": dict(resto[pais]),
+                "EjemplosAMayores": {t: list(v) for t, v in ejemplos_mayores[pais].items()},
+                "EjemplosResto": {t: list(v) for t, v in ejemplos_resto[pais].items()},
+            }
+        return resultado
+
+    def paises_bloqueados_dos_tipos(self):
+        """Paises de Tiendas_Web que hoy quedan con mas de un tipo de caja."""
+        try:
+            paises = sorted(set(self._cargar_pais_por_tienda().values()))
+        except Exception:
+            return []
+        return [
+            pais for pais, info in self.analizar_tipos_finales(paises).items()
+            if info.get("Bloqueado")
+        ]
+
+    def tipo_final_por_tienda(self, paises, tipo_defecto="1_Nueva_30"):
+        """Tienda -> TipoCaja final (mismo orden que ProcesarESTAREPP).
+
+        Solo para las tiendas de los paises indicados. Las tiendas sin tipo
+        reciben el tipo por defecto, igual que al procesar el pedido.
+        """
+        seleccion = {self.normalizar_pais(p) for p in (paises or []) if p}
+        if not seleccion:
+            return {}
+        homologacion = self._cargar_homologacion()
+        pais_por_tienda = self._cargar_pais_por_tienda()
+        tipo_por_tienda = self._cargar_tipo_inicial_por_tienda()
+        a_mayores = self._cargar_tiendas_a_mayores()
+        tipo_pais_actual = self._cargar_tipo_caja_pais_actual()
+
+        resultado = {}
+        for tienda, pais in pais_por_tienda.items():
+            if pais not in seleccion:
+                continue
+            if tienda in a_mayores:
+                resultado[tienda] = a_mayores[tienda]
+                continue
+            if tipo_pais_actual.get(pais):
+                resultado[tienda] = tipo_pais_actual[pais]
+                continue
+            tipo_texto = self.normalizar_tipo(tipo_por_tienda.get(tienda, ""))
+            if not tipo_texto:
+                resultado[tienda] = tipo_defecto
+                continue
+            resultado[tienda] = homologacion.get(tipo_texto.upper(), tipo_texto)
+        return resultado
+
+    # ---------------------------------------------------------
     # Lectura del maestro persistente
     # ---------------------------------------------------------
     @staticmethod
@@ -293,7 +507,11 @@ class GestorTipoCajaPais:
     # ---------------------------------------------------------
     # Preparar altas, coincidencias, conflictos y eliminaciones
     # ---------------------------------------------------------
-    def preparar_actualizacion(self, paises):
+    def preparar_actualizacion(self, paises, conservar=None):
+        """conservar: paises bloqueados (dos tipos de caja) que mantienen su
+        valor actual del maestro; no se analizan ni se eliminan."""
+        conservar = {self.normalizar_pais(p) for p in (conservar or [])}
+        paises = [p for p in (paises or []) if self.normalizar_pais(p) not in conservar]
         diagnosticos = self.analizar_paises(paises)
         maestro_actual = self.leer_maestro_excel()
 
@@ -336,8 +554,11 @@ class GestorTipoCajaPais:
                 "Accion": "ELIMINAR",
             }
             for pais, tipo in sorted(maestro_actual.items())
-            if pais not in seleccionados
+            if pais not in seleccionados and pais not in conservar
         ]
+        conservados = {
+            pais: tipo for pais, tipo in maestro_actual.items() if pais in conservar
+        }
 
         return {
             "Diagnosticos": diagnosticos,
@@ -346,6 +567,7 @@ class GestorTipoCajaPais:
             "SinCambios": sin_cambios,
             "Conflictos": conflictos,
             "Eliminar": eliminar,
+            "Conservados": conservados,
             "MaestroActual": maestro_actual,
         }
 

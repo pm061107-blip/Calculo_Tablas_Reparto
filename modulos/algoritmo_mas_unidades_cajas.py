@@ -1,6 +1,13 @@
 from collections import Counter, defaultdict
 
 
+def clave_calle(pasillo, lado):
+    """Clave unica de calle del silo: pasillo + lado (por ejemplo 04_02)."""
+    pasillo = str(pasillo or "").strip() or "(SIN PASILLO)"
+    lado = str(lado or "").strip()
+    return pasillo + "_" + lado if lado else pasillo
+
+
 class AlgoritmoMasUnidades:
     """
     Seleccion de cajas para el modo MAS UNIDADES.
@@ -21,9 +28,23 @@ class AlgoritmoMasUnidades:
 
     La seleccion es determinista: con la misma demanda, stock, ocupacion y
     carga por pasillos siempre devuelve las mismas matriculas.
+
+    V2.2 (comparativa real con el SILO, pedido de 86.449 lotes, 18/10/2026):
+    - La unidad de equilibrio es la CALLE = pasillo + lado (18 calles). Se
+      elige primero el pasillo fisico con menos movimientos (suma de sus dos
+      lados) y, dentro de el, el lado con menos movimientos. Antes solo se
+      equilibraba por pasillo y el desempate por nombre de celda cargaba
+      siempre el lado 01 (3.330 cajas frente a 1.161).
+    - Entre matriculas equivalentes de la misma calle se elige la posicion X
+      menor (mas cerca de cabecera) y despues la profundidad 01, igual que el
+      SILO. El vaciado de celdas deja de ser prioritario: el SILO no lo usa.
     """
 
-    PASILLOS_ESTANDAR = tuple(str(i).zfill(2) for i in range(1, 11))
+    PASILLOS_ESTANDAR = tuple(
+        str(i).zfill(2) + "_" + lado
+        for i in range(1, 11)
+        for lado in ("01", "02")
+    )
     MAX_CANDIDATOS_POR_PASILLO = 60
 
 
@@ -51,7 +72,18 @@ class AlgoritmoMasUnidades:
         return self._texto(caja.get("Matricula"))
 
     def _pasillo(self, caja):
-        return self._texto(caja.get("Pasillo")) or "(SIN PASILLO)"
+        """Calle de equilibrio: pasillo + lado (por ejemplo 04_02)."""
+        return clave_calle(caja.get("Pasillo"), caja.get("Lado"))
+
+    @staticmethod
+    def _pasillo_fisico(calle):
+        return str(calle or "").split("_")[0]
+
+    def _x(self, caja):
+        try:
+            return int(float(self._texto(caja.get("X")) or 0))
+        except Exception:
+            return 0
 
     def _celda(self, caja):
         return self._texto(caja.get("Celda") or caja.get("Posicion"))
@@ -72,10 +104,16 @@ class AlgoritmoMasUnidades:
         except Exception:
             return (2, profundidad)
 
+    def _clave_fisica(self, caja):
+        """Orden fisico del SILO: X menor y despues profundidad 01."""
+        return (
+            self._x(caja),
+            self._prioridad_profundidad(caja),
+        )
+
     def _clave_preorden_fisico(self, cajas, indice):
         caja = cajas[indice]
-        return (
-            self._prioridad_profundidad(caja),
+        return self._clave_fisica(caja) + (
             self._celda(caja),
             self._posicion(caja),
             self._matricula(caja),
@@ -310,11 +348,25 @@ class AlgoritmoMasUnidades:
                     if self._pasillo_estandar(pasillo)
                 ]
                 pasillos_valorables = estandar or pasillos_con_stock
-                carga_minima = min(carga[pasillo] for pasillo in pasillos_valorables)
+                # Primero el pasillo fisico menos cargado (suma de sus dos
+                # lados) y, dentro de el, la calle (lado) menos cargada.
+                carga_pasillo = defaultdict(int)
+                for calle, valor in carga.items():
+                    carga_pasillo[self._pasillo_fisico(calle)] += valor
+                minimo_pasillo = min(
+                    carga_pasillo[self._pasillo_fisico(calle)]
+                    for calle in pasillos_valorables
+                )
+                calles_pasillo = [
+                    calle
+                    for calle in pasillos_valorables
+                    if carga_pasillo[self._pasillo_fisico(calle)] == minimo_pasillo
+                ]
+                carga_minima = min(carga[calle] for calle in calles_pasillo)
                 pasillos_elegibles = {
-                    pasillo
-                    for pasillo in pasillos_valorables
-                    if carga[pasillo] == carga_minima
+                    calle
+                    for calle in calles_pasillo
+                    if carga[calle] == carga_minima
                 }
 
                 mejor_indice = None
@@ -342,9 +394,10 @@ class AlgoritmoMasUnidades:
                             ocupacion_celdas,
                         )
 
-                        valor = (
+                        # V2.2: criterio fisico del SILO. La limpieza de celda
+                        # solo desempata entre cajas con la misma X y profundidad.
+                        valor = self._clave_fisica(caja) + (
                             0 if limpia_doble else 1,
-                            self._prioridad_profundidad(caja),
                             0 if limpia_ahora else 1,
                             0 if completable else 1,
                             celda,

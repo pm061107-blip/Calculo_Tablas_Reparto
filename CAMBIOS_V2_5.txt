@@ -1,0 +1,77 @@
+CALCULO_TABLAS_REPARTO - VERSION 2.5
+Repeticion de tiendas grandes en el mismo CLA
+=====================================================================
+
+QUE HACE
+--------
+Al calcular las tablas, si alguna Tienda+Aparte supera el umbral de lotes
+(por defecto 2000), sale una ventana con la lista de esas tiendas:
+  Tienda | Aparte | Pais | Tipo caja | Lotes | Repetir (1-10) | lotes por destino
+
+- Por cada tienda el operador elige cuantas veces se repite (1 = no se repite).
+- "Sugerir (lotes / umbral)" rellena lotes/umbral redondeado hacia arriba.
+  "Todas a 1" lo deja como antes.
+- El umbral se cambia en la misma ventana ("Aplicar y guardar umbral") y queda
+  guardado en reparto.db (tabla CONFIG_PARAMETROS).
+- Abajo se ve: destinos necesarios, cuantos son por repeticiones y destinos
+  disponibles. Si no cabe, ACEPTAR queda desactivado.
+- "Cancelar calculo" no calcula nada.
+- Si ninguna tienda supera el umbral no aparece ninguna ventana.
+
+COMO SE COLOCAN
+---------------
+- Cada copia es un destino con lotes / N (4500 lotes x 3 = 1500 por destino).
+- La colocacion la hace la aplicacion con su logica de siempre (lado largo,
+  equilibrio de lotes y tipo de caja...), pero TODAS las copias van al CLA
+  donde se coloco la primera.
+- Si las copias no caben, el calculo se para y avisa. Nunca queda nada fuera.
+- Excepcion "un carrusel": si el pedido ya no cabia entero antes de repetir,
+  se permite (la ventana avisa de cuantas tiendas mas quedaran fuera), pero
+  cada tienda repetida queda con TODAS sus copias o con ninguna.
+
+DONDE ESTA
+----------
+- Reparto normal, un carrusel y paises fijos: al pulsar calcular, despues de
+  validar GRUTIEP.
+- Reparto por lados: igual; la capacidad son los lados marcados.
+- Busca fuera de tabla (normal y MODO DOMINGO): solo se pueden repetir las
+  tiendas NUEVAS (las de fuera de tabla). Capacidad = tolvas libres.
+  Al dia siguiente, una tienda repetida en la tabla activa se acepta si todas
+  sus copias estan en el mismo CLA (si estan en CLAs distintos sigue saliendo
+  ERROR CRITICO).
+- Adelanto: al cargar el subpedido o el pedido completo. En el pedido
+  completo solo se ofrecen las tiendas que quedan en el resto. Las copias son
+  filas de la misma tienda, por lo que la opcion elegida las lleva juntas a un
+  CLA. Cancelar = no se carga el pedido.
+
+MODO DOMINGO (editor de lados cortos)
+-------------------------------------
+- Nueva columna REP (x2, x3...) para las tiendas repetidas.
+- Las tiendas se identifican por su posicion (CLA + destino), asi las copias
+  se pueden mover una a una.
+- No deja mover/colocar una copia en un CLA distinto al de sus otras copias.
+
+FICHEROS
+--------
+Nuevo:      modulos/repeticion_tiendas.py
+            tests/test_repeticion_tiendas_v2_5.py
+Cambiados:  modulos/motor_reparto.py
+            modulos/motor_reparto_lados.py
+            modulos/motor_busca_fuera_tabla.py
+            modulos/formulario_reparto_base.py
+            modulos/formulario_reparto_por_lados.py
+            modulos/formulario_busca_fuera_tabla.py
+            modulos/formulario_calculo_adelanto.py
+            modulos/formulario_editor_lados_cortos_domingo.py
+            modulos/version_aplicacion.py  (2.5)
+            compilar_calculo_tablas_reparto.bat  (2.5 + hidden-import)
+
+PRUEBAS
+-------
+- 49 pruebas unitarias OK (9 nuevas).
+- Pedido real (593 tienda+aparte, 2 por encima de 2000 lotes):
+  5515 x3 y 836 x2 -> 596 destinos, cada tienda en un solo CLA, lotes
+  repartidos; por lados igual; un carrusel 340 destinos con todas las copias.
+- 10 tiendas x10 en dos CLA (683 > 680) -> se para y avisa.
+- Fuera de tabla real (358 nuevas): 361 asignaciones, sin pisar existentes;
+  modo domingo con copias: mover una copia a otro CLA queda bloqueado.

@@ -1,0 +1,52 @@
+CALCULO_TABLAS_REPARTO - VERSION 2.6
+Volumetria: paises con dos tipos de caja bloqueados
+=====================================================================
+
+PROBLEMA
+--------
+El tipo de caja de cada tienda se decide en este orden (el ultimo manda):
+  TipoCajaInicial -> homologacion -> TipoCajaPais (todo el pais)
+  -> TipoCajaTiendaAMayores (por tienda)
+La tabla de paises de Volumetria solo miraba TipoCajaInicial, asi que un pais
+con tiendas a mayores de otro tipo se podia elegir 300/400 y acababa con dos
+tipos de caja (caso ESPAÑA: 44 tiendas a mayores 3_Usada_40 y el resto
+2_Reutilizada_30 / 1_Nueva_30).
+
+QUE HACE AHORA
+--------------
+Al calcular paises, la aplicacion calcula el tipo FINAL de cada tienda del pais
+con el mismo orden que el procesado del pedido. Cada pais se mira por separado:
+dos paises distintos pueden tener tipos de caja distintos sin problema.
+
+- Pais con DOS TIPOS de caja (con el maestro actual):
+    * Se muestra en la tabla, en NARANJA, con los check 300 y 400 bloqueados.
+    * Columna MAESTRO ACTUAL: "BLOQUEADO: 2 TIPOS DE CAJA" + resumen
+      (tiendas a mayores y resto del pais). Clic en el texto = ventana con
+      las tiendas de cada tipo.
+    * La seleccion automatica no lo toca.
+    * Al CARGAR PAISES 400 EN MAESTRO se conserva tal como esta en
+      TipoCajaPais (ni se anade, ni se cambia, ni se borra). La vista previa
+      lo indica.
+    * Sus cajas cuentan en 300 o 400 segun como este hoy en el maestro.
+    * Arriba se ve "BLOQUEADOS 2 TIPOS: n".
+- Pais que HOY tiene un solo tipo pero que con la otra opcion quedaria con
+  dos (por las tiendas a mayores): fila en AMARILLO, solo se puede elegir la
+  opcion buena ("SOLO 300" o "SOLO 400"). Asi no se puede crear un pais mixto.
+- Paises sin tiendas a mayores: igual que antes.
+
+Para desbloquear un pais hay que corregir TipoCajaTiendaAMayores o
+TipoCajaPais en Maestros.
+
+FICHEROS
+--------
+Cambiados:  modulos/gestor_tipo_caja_pais.py
+            modulos/formulario_volumetria_reutilizacion_paises.py
+            modulos/version_aplicacion.py  (2.6)
+            compilar_calculo_tablas_reparto.bat  (2.6)
+Nuevo:      tests/test_paises_dos_tipos_caja_v2_6.py
+
+PRUEBAS
+-------
+- 55 pruebas unitarias OK (6 nuevas).
+- Con la base real: ESPAÑA sale BLOQUEADO (44 a mayores 3_Usada_40 | resto
+  223 2_Reutilizada_30, 19 1_Nueva_30); el resto de paises no cambia.

@@ -14,7 +14,8 @@ class AlgoritmoXDOC:
     - Por encima de la moda se limita siempre a un maximo del 20%.
       Ejemplo: moda 14 y tolerancia 40 acepta cajas de 9 a 16 unidades.
     - Prioridad de cada lote: proximidad a la moda, limpieza fisica de celda,
-      prioridad/profundidad fisica y, solo al final, pasillo.
+      numero de cajas, equilibrio de pasillos y despues profundidad/posicion
+      (V2.2: el pasillo va antes del desempate fisico).
     """
 
     def __init__(self):
@@ -445,14 +446,17 @@ class AlgoritmoXDOC:
             if self._celda(cajas[indice]) in celdas
         )
 
+        # V2.2: el equilibrio de pasillos va antes del desempate fisico. Antes
+        # el desempate por nombre de celda decidia siempre a favor del
+        # pasillo 01 (103 de 277 cajas XDOC en la comparativa real).
         return (
             abs(objetivo - total),
             -total,
             -len(celdas),
             -cajas_en_celdas,
-            self._valor_fisico(seleccion, cajas),
             len(seleccion),
             self._valor_pasillo_suave(seleccion, cajas, carga_pasillos),
+            self._valor_fisico(seleccion, cajas),
             tuple(sorted(self._matricula(cajas[indice]) for indice in seleccion)),
         )
 

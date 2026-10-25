@@ -36,7 +36,7 @@ class ExportadorSinVolumetria:
         indices_oficiales = self.calculador._cargar_volumetria()
         filas = self.bd.consultar("""
             SELECT Seccion, Modelo, Calidad, Color, TallaNum, Campaña, Año, UxL
-            FROM ESTAREPP
+            FROM CAJAS_PEDIDO_LINEAS
             GROUP BY Seccion, Modelo, Calidad, Color, TallaNum, Campaña, Año, UxL
         """)
 

@@ -18,6 +18,7 @@ from modulos.gestor_pedidos_trabajo import GestorPedidosTrabajo
 from modulos.componente_pedido_trabajo import ComponentePedidoTrabajo
 from modulos.ventanas_tk import crear_marco_scrollable
 from modulos.dialogo_progreso import DialogoProgreso
+from modulos.repeticion_tiendas import expandir_filas, pedir_repeticiones
 from modulos.gestor_reset_calculos import GestorResetCalculos
 
 
@@ -122,37 +123,9 @@ class FormularioCalculoAdelanto:
 
         self.crear_boton_reset(contenedor)
         self.crear_bloque_resumen(contenedor)
-        self.pedido_escenario = ComponentePedidoEscenarioActivo(
-            contenedor,
-            conexion=self.bd.conexion,
-            ventana=self.ventana,
-            acciones=[
-                {
-                    "texto": "ACTIVO -> SUBPEDIDO",
-                    "command": self.usar_escenario_como_subpedido,
-                    "width": 22,
-                },
-                {
-                    "texto": "DESCARTADAS -> SUBPEDIDO",
-                    "command": self.usar_descartadas_como_subpedido,
-                    "width": 26,
-                },
-                {
-                    "texto": "ACTIVO -> PEDIDO COMPLETO",
-                    "command": self.usar_escenario_como_pedido_completo,
-                    "width": 28,
-                },
-                {
-                    "texto": "DESCARTADAS -> PEDIDO COMPLETO",
-                    "command": self.usar_descartadas_como_pedido_completo,
-                    "width": 32,
-                },
-            ],
-            padx=12,
-            pady=4,
-            wraplength=850,
-            compacto=True,
-        )
+        # V2.3: el bloque "Pedido seleccionado en Calculo de cajas" (escenario
+        # activo / tiendas descartadas) ya no se muestra en Adelanto porque
+        # aqui nunca se utiliza. Los subpedidos se importan desde fichero.
         self.grutiep = ComponenteGRUTIEP(
             contenedor,
             ventana=self.ventana,
@@ -465,7 +438,8 @@ class FormularioCalculoAdelanto:
                 tipo,
             )
             self.pedido_trabajo_subpedido.refrescar()
-            self.copiar_tmp_a_tabla("ADELANTO_PEDIDO_1", "SUBPEDIDO", None)
+            if not self.copiar_tmp_a_tabla("ADELANTO_PEDIDO_1", "SUBPEDIDO", None):
+                return
             self.opciones_subpedido = self.calcular_opciones("ADELANTO_PEDIDO_1", "SUBPEDIDO")
             self.mostrar_opciones(self.tabla_subpedido, self.opciones_subpedido)
 
@@ -512,7 +486,8 @@ class FormularioCalculoAdelanto:
             self.bd.ejecutar("DELETE FROM ADELANTO_PEDIDO_2")
             self.bd.ejecutar("DELETE FROM ADELANTO_RESTO")
 
-            self.copiar_tmp_a_tabla("ADELANTO_PEDIDO_2", "PEDIDO_COMPLETO", None)
+            if not self.copiar_tmp_a_tabla("ADELANTO_PEDIDO_2", "PEDIDO_COMPLETO", None):
+                return
             self.crear_resto_sin_adelanto()
 
             self.opciones_resto = self.calcular_opciones("ADELANTO_RESTO", "RESTO")
@@ -593,7 +568,8 @@ class FormularioCalculoAdelanto:
                 estado,
             )
             self.pedido_trabajo_subpedido.refrescar()
-            self.copiar_tmp_a_tabla("ADELANTO_PEDIDO_1", "SUBPEDIDO", None)
+            if not self.copiar_tmp_a_tabla("ADELANTO_PEDIDO_1", "SUBPEDIDO", None):
+                return
             self.opciones_subpedido = self.calcular_opciones(
                 "ADELANTO_PEDIDO_1", "SUBPEDIDO"
             )
@@ -664,7 +640,8 @@ class FormularioCalculoAdelanto:
                 ),
             )
             self.pedido_trabajo_subpedido.refrescar()
-            self.copiar_tmp_a_tabla("ADELANTO_PEDIDO_1", "SUBPEDIDO", None)
+            if not self.copiar_tmp_a_tabla("ADELANTO_PEDIDO_1", "SUBPEDIDO", None):
+                return
             self.opciones_subpedido = self.calcular_opciones(
                 "ADELANTO_PEDIDO_1", "SUBPEDIDO"
             )
@@ -731,9 +708,10 @@ class FormularioCalculoAdelanto:
             self.pedido_trabajo_completo.refrescar()
             self.bd.ejecutar("DELETE FROM ADELANTO_PEDIDO_2")
             self.bd.ejecutar("DELETE FROM ADELANTO_RESTO")
-            self.copiar_tmp_a_tabla(
+            if not self.copiar_tmp_a_tabla(
                 "ADELANTO_PEDIDO_2", "PEDIDO_COMPLETO", None
-            )
+            ):
+                return
             self.crear_resto_sin_adelanto()
 
             self.opciones_resto = self.calcular_opciones(
@@ -810,7 +788,8 @@ class FormularioCalculoAdelanto:
             self.pedido_trabajo_completo.refrescar()
             self.bd.ejecutar("DELETE FROM ADELANTO_PEDIDO_2")
             self.bd.ejecutar("DELETE FROM ADELANTO_RESTO")
-            self.copiar_tmp_a_tabla("ADELANTO_PEDIDO_2", "PEDIDO_COMPLETO", None)
+            if not self.copiar_tmp_a_tabla("ADELANTO_PEDIDO_2", "PEDIDO_COMPLETO", None):
+                return
             self.crear_resto_sin_adelanto()
 
             self.opciones_resto = self.calcular_opciones("ADELANTO_RESTO", "RESTO")
@@ -955,12 +934,35 @@ class FormularioCalculoAdelanto:
     #---------------------------------------------------------
     def copiar_tmp_a_tabla(self, tabla, fase, clasificador):
 
-        self.bd.ejecutar("DELETE FROM " + tabla)
-
         registros = self.bd.consultar("""
             SELECT Tienda, Aparte, Lotes, Pais, TipoCaja
             FROM TMP_ESTAREPP
         """)
+
+        # V2.5: Tienda+Aparte que superan el umbral de lotes. Las copias son
+        # filas de la misma tienda, asi que la opcion elegida las lleva todas
+        # juntas al mismo CLA.
+        if fase == "PEDIDO_COMPLETO":
+            # Solo cuentan las tiendas que quedaran en el resto.
+            tiendas_adelanto = {r[0] for r in self.registros_subpedido if r}
+            candidatas = [r for r in registros if r[0] not in tiendas_adelanto]
+            contexto = "Adelanto - pedido completo (solo tiendas del resto)"
+        else:
+            candidatas = list(registros)
+            contexto = "Adelanto - subpedido"
+        repeticiones = pedir_repeticiones(
+            self.ventana, self.bd.conexion, candidatas, contexto=contexto
+        )
+        if repeticiones is None:
+            messagebox.showinfo(
+                "Importacion cancelada",
+                "No se ha cargado el pedido. Vuelve a importarlo cuando quieras.",
+                parent=self.ventana,
+            )
+            return False
+        registros = expandir_filas(registros, repeticiones)
+
+        self.bd.ejecutar("DELETE FROM " + tabla)
 
         for tienda, aparte, lotes, pais, tipo_caja in registros:
             self.bd.insertar(
@@ -969,6 +971,7 @@ class FormularioCalculoAdelanto:
             )
 
         self.bd.guardar()
+        return True
 
     #---------------------------------------------------------
     # Crear resto quitando COMPLETAMENTE las tiendas del adelanto
@@ -1093,6 +1096,9 @@ class FormularioCalculoAdelanto:
                     "Fase": fase,
                     "Clasificador": clasificador,
                     "Nombre": opcion_base["Nombre"],
+                    "NombreBase": opcion_base["Nombre"],
+                    "CapacidadMaxima": opcion_base["Capacidad"],
+                    "DestinosMax": None,
                     "Tipo": opcion_base["Tipo"],
                     "LadoCorto": opcion_base.get("LadoCorto"),
                     "Capacidad": opcion_base["Capacidad"],
@@ -1348,6 +1354,17 @@ class FormularioCalculoAdelanto:
             )
             return
 
+        if opcion.get("Tipo") == "LARGOS":
+            opcion = self.ajustar_tolvas_lados_largos(
+                opcion,
+                tabla_origen="ADELANTO_PEDIDO_1",
+                tabla_visual=self.tabla_subpedido,
+                opciones=self.opciones_subpedido,
+                bloque="SUBPEDIDO / NO EVACUAR",
+            )
+            if opcion is None:
+                return
+
         self.opcion_subpedido = opcion
         self.registros_subpedido = opcion["Registros"]
         self.guardar_seleccion("ADELANTO", opcion)
@@ -1381,6 +1398,17 @@ class FormularioCalculoAdelanto:
             )
             return
 
+        if opcion.get("Tipo") == "LARGOS":
+            opcion = self.ajustar_tolvas_lados_largos(
+                opcion,
+                tabla_origen="ADELANTO_RESTO",
+                tabla_visual=self.tabla_resto,
+                opciones=self.opciones_resto,
+                bloque="PEDIDO COMPLETO MENOS ADELANTO / EVACUAR",
+            )
+            if opcion is None:
+                return
+
         self.opcion_resto = opcion
         self.registros_resto = opcion["Registros"]
         self.guardar_seleccion("RESTO", opcion)
@@ -1392,6 +1420,90 @@ class FormularioCalculoAdelanto:
             + str(round(opcion["Lotes"], 2)) + " lotes"
         )
         self.actualizar_resumen()
+
+    #---------------------------------------------------------
+    # V2.3 - Numero de tolvas en opciones de 2 lados largos
+    #---------------------------------------------------------
+    def preguntar_tolvas_lados_largos(self, opcion, bloque):
+
+        maximo = int(opcion.get("CapacidadMaxima") or opcion["Capacidad"])
+
+        return simpledialog.askinteger(
+            "Tolvas en lados largos - " + bloque,
+            bloque
+            + "\nCLA " + str(opcion["Clasificador"])
+            + " | " + str(opcion.get("NombreBase") or opcion["Nombre"])
+            + "\n\n¿Cuantas tolvas (destinos) quieres utilizar?"
+            + "\n\nMaximo disponible: " + str(maximo)
+            + "\nSe usaran las primeras tolvas por prioridad del clasificador "
+            "y se volvera a calcular que tiendas entran, sin romper tienda.",
+            parent=self.ventana,
+            initialvalue=maximo,
+            minvalue=1,
+            maxvalue=maximo,
+        )
+
+    def ajustar_tolvas_lados_largos(
+        self,
+        opcion,
+        tabla_origen,
+        tabla_visual,
+        opciones,
+        bloque,
+    ):
+        """Pregunta las tolvas a usar y recalcula la opcion con esa capacidad.
+
+        Devuelve la opcion recalculada o None si el operador cancela o si no
+        cabe ninguna tienda completa en ese numero de tolvas.
+        """
+        tolvas = self.preguntar_tolvas_lados_largos(opcion, bloque)
+
+        if tolvas is None:
+            return None
+
+        tolvas = int(tolvas)
+        maximo = int(opcion.get("CapacidadMaxima") or opcion["Capacidad"])
+        seleccion = self.seleccionar_mejores_tiendas(tabla_origen, tolvas)
+
+        if seleccion["Apartes"] <= 0:
+            messagebox.showwarning(
+                "No cabe ninguna tienda",
+                "Con " + str(tolvas) + " tolvas no cabe ninguna tienda completa "
+                "(con todos sus apartes). Elige mas tolvas.",
+                parent=self.ventana,
+            )
+            return None
+
+        nombre_base = str(opcion.get("NombreBase") or opcion["Nombre"])
+        if tolvas < maximo:
+            nombre = nombre_base + " - " + str(tolvas) + " de " + str(maximo) + " tolvas"
+        else:
+            nombre = nombre_base
+
+        opcion.update({
+            "Nombre": nombre,
+            "NombreBase": nombre_base,
+            "CapacidadMaxima": maximo,
+            "Capacidad": tolvas,
+            "DestinosMax": tolvas if tolvas < maximo else None,
+            "Registros": seleccion["Registros"],
+            "Tiendas": seleccion["Tiendas"],
+            "Apartes": seleccion["Apartes"],
+            "Lotes": seleccion["Lotes"],
+            "FueraTiendas": seleccion["FueraTiendas"],
+            "FueraApartes": seleccion["FueraApartes"],
+            "FueraLotes": seleccion["FueraLotes"],
+        })
+
+        # Refrescar la tabla visual manteniendo la opcion seleccionada.
+        self.mostrar_opciones(tabla_visual, opciones)
+        try:
+            tabla_visual.selection_set(str(opcion["Id"]))
+            tabla_visual.see(str(opcion["Id"]))
+        except Exception:
+            pass
+
+        return opcion
 
     #---------------------------------------------------------
     # Obtener opcion seleccionada de una tabla
@@ -2122,6 +2234,12 @@ class FormularioCalculoAdelanto:
             WHERE {condiciones}
             ORDER BY Prioridad_Orden
         """.format(condiciones=" AND ".join(condiciones))
+
+        # V2.3: si el operador limito las tolvas de los lados largos, solo se
+        # usan las primeras N tolvas por prioridad del clasificador.
+        destinos_max = opcion.get("DestinosMax")
+        if destinos_max:
+            sql += " LIMIT " + str(int(destinos_max))
 
         return self.bd.consultar(sql)
 

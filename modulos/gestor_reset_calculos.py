@@ -34,6 +34,8 @@ class GestorResetCalculos:
 
     TABLAS_CAJAS_SIN_VOLUMETRIA = (
         "ESTAREPP",
+        "CAJAS_PEDIDO_LINEAS",
+        "CAJAS_PEDIDOS_IMPORTADOS",
         "CAJAS_CONTENEDORES",
         "CAJAS_PEDIDO_DEMANDA",
         "CAJAS_RESULTADO_DETALLE",

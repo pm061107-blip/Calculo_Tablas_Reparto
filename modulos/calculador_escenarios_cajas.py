@@ -12,6 +12,10 @@ from collections import defaultdict
 
 from bd.basedatos import BaseDatos
 from modulos.motor_calculo_cajas_pedido import MotorCalculoCajasPedido
+from modulos.gestor_pedidos_cajas import (
+    GestorPedidosCajas,
+    linea_eliminada_por_picos,
+)
 
 
 class CalculadorEscenariosCajas:
@@ -63,16 +67,18 @@ class CalculadorEscenariosCajas:
     def _cargar_base_pedido(self, motor, umbral, tiendas_fijas=None):
         """Prepara la base comun de todos los escenarios.
 
-        El umbral se calcula exclusivamente con la demanda de tiendas no fijas.
-        Todas las lineas validas de las tiendas fijas se incorporan a la base,
-        aunque el SKU no alcance el umbral entre las tiendas normales.
+        V2.1: el umbral se calcula solo con la demanda de los pedidos marcados
+        con picos y de tiendas no fijas. Las lineas de pedidos sin picos y
+        todas las lineas de las tiendas fijas se conservan siempre.
         """
+        GestorPedidosCajas(self.bd.conexion)
         filas = self.bd.consultar(
             """
             SELECT
                 Tienda, Aparte, Modelo, Calidad, Color, TallaNum,
-                Campaña, Año, UxL, Unidades, Lotes
-            FROM ESTAREPP
+                Campaña, Año, UxL, Unidades, Lotes,
+                IFNULL(CalcularPicos, 1)
+            FROM CAJAS_PEDIDO_LINEAS
             """
         )
 
@@ -88,6 +94,9 @@ class CalculadorEscenariosCajas:
         lotes_tiendas_fijas = 0.0
         registros_tiendas_fijas = 0
         tallas_invalidas = 0
+        unidades_sin_picos = 0
+        lotes_sin_picos = 0.0
+        registros_sin_picos = 0
 
         for fila in filas:
             (
@@ -102,7 +111,9 @@ class CalculadorEscenariosCajas:
                 uxl,
                 unidades,
                 lotes,
+                calcular_picos,
             ) = fila
+            calcular_picos = bool(int(calcular_picos or 0))
 
             talla = motor.normalizar_talla(talla_num)
             if talla is None:
@@ -123,6 +134,7 @@ class CalculadorEscenariosCajas:
                 "Lotes": lotes_num,
                 "UxL": motor.numero(uxl, 0),
                 "EsTiendaFija": bool(es_tienda_fija),
+                "CalcularPicos": calcular_picos,
             }
             registros.append(registro)
             unidades_totales_por_sku[sku] += unidades_num
@@ -134,9 +146,13 @@ class CalculadorEscenariosCajas:
                 unidades_tiendas_fijas += unidades_num
                 lotes_tiendas_fijas += lotes_num
                 registros_tiendas_fijas += 1
-            else:
+            elif calcular_picos:
                 unidades_normales_por_sku[sku] += unidades_num
                 lotes_normales_por_sku[sku] += lotes_num
+            else:
+                unidades_sin_picos += unidades_num
+                lotes_sin_picos += lotes_num
+                registros_sin_picos += 1
 
         umbral = int(umbral or 0)
         skus_permitidos = {
@@ -149,7 +165,12 @@ class CalculadorEscenariosCajas:
         registros_base = [
             registro
             for registro in registros
-            if registro["EsTiendaFija"] or registro["SKU"] in skus_permitidos
+            if not linea_eliminada_por_picos(
+                registro["SKU"],
+                registro["CalcularPicos"],
+                registro["EsTiendaFija"],
+                skus_permitidos,
+            )
         ]
 
         filtro = {
@@ -172,7 +193,17 @@ class CalculadorEscenariosCajas:
             "TiendasFijasEnPedido": len(tiendas_fijas_en_pedido),
             "RegistrosTiendasFijas": int(registros_tiendas_fijas),
             "RegistrosTallaInvalida": int(tallas_invalidas),
+            "UnidadesSinPicos": int(unidades_sin_picos),
+            "LotesSinPicos": float(lotes_sin_picos),
+            "RegistrosSinPicos": int(registros_sin_picos),
         }
+        try:
+            resumen_pedidos = GestorPedidosCajas(self.bd.conexion).resumen()
+        except Exception:
+            resumen_pedidos = {}
+        filtro["Pedidos"] = int(resumen_pedidos.get("Pedidos", 0) or 0)
+        filtro["PedidosConPicos"] = int(resumen_pedidos.get("ConPicos", 0) or 0)
+        filtro["PedidosSinPicos"] = int(resumen_pedidos.get("SinPicos", 0) or 0)
         return registros_base, skus_permitidos, filtro
 
     @staticmethod

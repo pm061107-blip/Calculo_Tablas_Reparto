@@ -1,6 +1,7 @@
 """Pedido persistente del escenario activo calculado en Cajas.
 
-El formulario de calculo de cajas trabaja siempre sobre ESTAREPP, pero los
+El formulario de calculo de cajas trabaja sobre sus pedidos acumulados
+(CAJAS_PEDIDO_LINEAS, V2.1), pero los
 formularios de reparto no deben depender de que esa tabla siga conteniendo el
 mismo pedido. Cuando el operador activa un escenario, este modulo materializa
 una copia completa y autonoma de las lineas que forman ese escenario.
@@ -16,6 +17,10 @@ from datetime import datetime
 import sqlite3
 
 from modulos.motor_calculo_cajas_pedido import MotorCalculoCajasPedido
+from modulos.gestor_pedidos_cajas import (
+    GestorPedidosCajas,
+    linea_eliminada_por_picos,
+)
 
 
 class ErrorPedidoEscenarioActivo(RuntimeError):
@@ -216,24 +221,28 @@ class GestorPedidoEscenarioActivo:
         self.conexion.commit()
 
     def _leer_estarepp(self):
-        if not self._tabla_existe("ESTAREPP"):
-            raise ErrorPedidoEscenarioActivo(
-                "La tabla ESTAREPP no existe. Importa primero el pedido en "
-                "Calculo de cajas."
-            )
+        """Lee las lineas de los pedidos de Calculo de cajas (V2.1).
 
+        Cada fila devuelve las 21 columnas de ESTAREPP y, en la posicion 21,
+        el indicador CalcularPicos de su pedido.
+        """
+        GestorPedidosCajas(self.conexion)
         columnas = ", ".join(
             self._identificador(columna) for columna in self.COLUMNAS_ESTAREPP
         )
         cursor = self.conexion.cursor()
-        cursor.execute("SELECT " + columnas + " FROM ESTAREPP")
+        cursor.execute(
+            "SELECT " + columnas + ", IFNULL(\"CalcularPicos\", 1) FROM "
+            + self._identificador(GestorPedidosCajas.TABLA_LINEAS)
+        )
         return cursor.fetchall()
 
     def _construir_pedido(self, escenario, umbral, tiendas_fijas):
         filas = self._leer_estarepp()
         if not filas:
             raise ErrorPedidoEscenarioActivo(
-                "ESTAREPP no contiene registros para materializar el escenario."
+                "Calculo de cajas no tiene ningun pedido importado para "
+                "materializar el escenario."
             )
 
         escenario = escenario or {}
@@ -252,12 +261,15 @@ class GestorPedidoEscenarioActivo:
             # completa del pedido inicial de las tiendas eliminadas por el
             # grupo. No debe pasar por el filtro de picos ni por la validacion
             # de talla usada por el motor de cajas. Por eso se toma desde las
-            # filas originales de ESTAREPP antes de preparar la demanda activa.
+            # lineas originales de los pedidos antes de preparar la demanda activa.
             grupo = str(escenario.get("Grupo", "") or "")
             descripcion = str(escenario.get("Descripcion", "") or "")
             descartadas_por_grupo = []
 
-            for fila in filas:
+            numero_columnas = len(self.COLUMNAS_ESTAREPP)
+            for fila_completa in filas:
+                fila = tuple(fila_completa[:numero_columnas])
+                calcular_picos = bool(int(fila_completa[numero_columnas] or 0))
                 tienda = self._numero_entero(fila[3], None)
                 if tienda is not None and tienda in tiendas_excluidas:
                     descartadas_por_grupo.append((tuple(fila), "GRUPO", grupo, descripcion))
@@ -282,8 +294,8 @@ class GestorPedidoEscenarioActivo:
                 es_fija = tienda is not None and tienda in tiendas_fijas
                 unidades = self._numero_entero(fila[17], 0) or 0
 
-                preparadas.append((tuple(fila), tienda, sku, es_fija))
-                if not es_fija:
+                preparadas.append((tuple(fila), tienda, sku, es_fija, calcular_picos))
+                if not es_fija and calcular_picos:
                     unidades_normales_por_sku[sku] = (
                         int(unidades_normales_por_sku.get(sku, 0)) + unidades
                     )
@@ -295,10 +307,12 @@ class GestorPedidoEscenarioActivo:
             }
 
             resultado = []
-            for fila, tienda, sku, es_fija in preparadas:
+            for fila, tienda, sku, es_fija, calcular_picos in preparadas:
                 if tienda is not None and tienda in tiendas_excluidas:
                     continue
-                if not es_fija and sku not in skus_permitidos:
+                if linea_eliminada_por_picos(
+                    sku, calcular_picos, es_fija, skus_permitidos
+                ):
                     # Los SKU bajo umbral afectan al pedido activo, pero no se
                     # mezclan dentro del pedido de tiendas descartadas. Si mas
                     # adelante se necesita auditoria de picos, debe ir a una

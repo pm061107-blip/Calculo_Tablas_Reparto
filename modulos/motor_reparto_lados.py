@@ -32,7 +32,7 @@ class MotorRepartoLados(MotorReparto):
     # ---------------------------------------------------------
     # Entrada principal
     # ---------------------------------------------------------
-    def reparto_por_lados(self, ids_lados, tamano_bloque=10):
+    def reparto_por_lados(self, ids_lados, tamano_bloque=10, repeticiones=None):
         ids_lados = list(dict.fromkeys(ids_lados or []))
 
         if len(ids_lados) < 1:
@@ -53,6 +53,7 @@ class MotorRepartoLados(MotorReparto):
         self.prioridad_tienda_activa = "NORMAL"
 
         self.cargar_tmp()
+        self.aplicar_repeticiones(repeticiones)
         self.cargar_destinos_seleccionados()
 
         if len(self.tmp) == 0:
@@ -168,6 +169,14 @@ class MotorRepartoLados(MotorReparto):
         self.prioridad_tienda_activa = "NORMAL"
         candidatos = self.obtener_primer_destino_libre_por_lado_fisico()
 
+        # V2.5: las copias de una Tienda+Aparte repetida van al mismo CLA.
+        clave = self.clave_tienda(tienda)
+        if self.repeticiones and clave in self.cla_repeticion:
+            candidatos = [
+                destino for destino in candidatos
+                if destino["Clasificador"] == self.cla_repeticion[clave]
+            ]
+
         if not candidatos:
             return None
 
@@ -273,6 +282,9 @@ class MotorRepartoLados(MotorReparto):
     def validar_reparto_completo_lados(self):
         asignados = self.contar_destinos_asignados()
         esperados = len(self.tmp)
+
+        if asignados == esperados:
+            self.validar_reparto_completo_repeticiones()
 
         if asignados != esperados:
             raise RuntimeError(

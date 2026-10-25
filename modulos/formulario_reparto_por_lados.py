@@ -19,6 +19,7 @@ from modulos.componente_pedido_trabajo import ComponentePedidoTrabajo
 from modulos.gestor_grutiep_calculo import preparar_pedido_con_grutiep_para_tablas
 from modulos.ventanas_tk import crear_marco_scrollable
 from modulos.dialogo_progreso import DialogoProgreso
+from modulos.repeticion_tiendas import preguntar_durante_progreso
 from modulos.gestor_reset_calculos import GestorResetCalculos
 
 
@@ -654,11 +655,36 @@ class FormularioRepartoPorLados:
             )
             clave_calculo = preparacion_grutiep["ClavePedidoTrabajo"]
 
-            progreso.actualizar(mensaje="Calculando reparto por lados...")
             motor = MotorRepartoLados(
                 clave_pedido_trabajo=clave_calculo
             )
-            resumen = motor.reparto_por_lados(ids, self.obtener_tamano_bloque())
+
+            # V2.5: tiendas/apartes que superan el umbral de lotes
+            motor.cargar_tmp()
+            capacidad = sum(
+                int((obtener_lado(id_lado) or {}).get("CapacidadEsperada", 0) or 0)
+                for id_lado in ids
+            ) or None
+            repeticiones, progreso = preguntar_durante_progreso(
+                progreso,
+                lambda: DialogoProgreso(
+                    self.ventana,
+                    titulo="Calculando reparto por lados",
+                    mensaje="Calculando reparto por lados...",
+                ),
+                self.ventana,
+                self.bd.conexion,
+                motor.tmp,
+                capacidad=capacidad,
+                contexto="Reparto por lados",
+            )
+            if repeticiones is None:
+                return
+
+            progreso.actualizar(mensaje="Calculando reparto por lados...")
+            resumen = motor.reparto_por_lados(
+                ids, self.obtener_tamano_bloque(), repeticiones=repeticiones
+            )
             self.ultimo_resumen = resumen
             self.mostrar_resultado(resumen)
 

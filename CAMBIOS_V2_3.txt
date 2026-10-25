@@ -1,0 +1,46 @@
+CALCULO TABLAS REPARTO - V2.3
+Fecha: 19/10/2026
+
+REQUISITO
+=========
+Instalar antes la V2.2 (el BAT comprueba que esta instalada).
+
+CAMBIOS EN EL FORMULARIO CALCULO ADELANTO
+=========================================
+1. Se quita el bloque "Pedido seleccionado en Calculo de cajas" (escenario
+   activo / tiendas descartadas) con sus 4 botones (ACTIVO -> SUBPEDIDO,
+   DESCARTADAS -> SUBPEDIDO, ACTIVO -> PEDIDO COMPLETO, DESCARTADAS -> PEDIDO
+   COMPLETO). En Adelanto nunca se usa.
+
+2. Tolvas en lados largos. Al pulsar "Usar opcion seleccionada" sobre una
+   opcion "2 Lado_Largo" (subpedido o pedido completo) se pregunta:
+   "¿Cuantas tolvas (destinos) quieres utilizar?", con el maximo por defecto
+   (254 en cada CLA).
+   - Se vuelve a calcular que tiendas entran en ese numero de tolvas, sin
+     romper tienda (por lotes de mayor a menor, como hasta ahora).
+   - La opcion pasa a llamarse "2 Lado_Largo - N de 254 tolvas" y la tabla
+     muestra la capacidad, tiendas, apartes y lotes recalculados.
+   - Al generar las tablas solo se usan las N primeras tolvas por prioridad
+     del clasificador.
+   - Cancelar: no se selecciona la opcion.
+   - Si se elige el subpedido, el pedido completo se recalcula como siempre
+     (las tiendas que no entran en el subpedido pasan al pedido completo).
+   Las opciones con lado corto y "Carrusel completo" no preguntan.
+
+ARCHIVOS
+========
+Modificados:
+- modulos/formulario_calculo_adelanto.py
+- modulos/version_aplicacion.py (2.3)
+- compilar_calculo_tablas_reparto.bat (version 2.3 y comprobacion de V2.2)
+Nuevos:
+- tests/test_adelanto_tolvas_v2_3.py
+- CAMBIOS_V2_3.txt
+
+PRUEBAS
+=======
+- 40 pruebas automaticas OK (36 anteriores + 4 nuevas).
+- Prueba con datos reales: subpedido de 200 Tienda+Aparte en CLA 1 con 150
+  tolvas -> 135 tiendas / 150 apartes; el reparto usa exactamente las 150
+  primeras tolvas largas por prioridad. Pedido completo en CLA 2 con el
+  maximo (254) sin cambios.

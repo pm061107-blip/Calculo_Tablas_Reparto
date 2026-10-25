@@ -1,0 +1,66 @@
+CALCULO TABLAS REPARTO - V2.4
+Fecha: 19/10/2026 (sustituye al zip V2.4 anterior)
+
+REQUISITO
+=========
+Tener instaladas V2.2 y V2.3 (el BAT comprueba la version).
+
+BUSCA FUERA DE TABLA - MODO DOMINGO
+===================================
+Nuevo check en Opciones:
+  "MODO DOMINGO: calcular como siempre y despues mover a mano las tiendas
+   de los lados cortos (con informacion de tipo de caja)"
+
+Con el check marcado, CALCULAR Y EXPORTAR hace:
+1. Calcula EXACTAMENTE igual que sin el check (lados largos y lados cortos,
+   con la misma pregunta de Lado_corto cuando hace falta).
+2. Abre el editor "Modo domingo - Ajuste de lados cortos" ANTES de guardar:
+   - "Como quedan los CLA": tiendas/apartes, lotes y, por cada tipo de caja,
+     numero de cajas / lotes. Fila de diferencia entre CLA 1 y CLA 2 (en rojo
+     si la diferencia de lotes supera el 5%).
+   - "Como quedan los lados": los 8 lados con tolvas, capacidad, existentes,
+     nuevas, libres, lotes y cajas por tipo (n / lotes).
+   - "Tiendas en lados cortos (movibles)": las que el calculo ha puesto en
+     lados cortos, coloreadas por tipo de caja (mismos colores que el mapa
+     PDF). Filtro "Ver tipo de caja" y boton "Seleccionar todas las
+     visibles".
+   - "Mover seleccionadas a" otro lado corto.
+   - "Quitar (pasan a pendientes)" y despues colocarlas con los botones
+     "CLA 1 - Corto 1/2" y "CLA 2 - Corto 3/4" (muestran las tolvas libres).
+   - "Repartir pendientes": reparto automatico en los lados cortos marcados.
+   - La tolva la asigna la aplicacion por prioridad y cada lado corto se
+     mantiene siempre en sus primeras tolvas (sin huecos delante).
+   - ACEPTAR Y EXPORTAR bloqueado mientras quede alguna pendiente.
+   - Cancelar: no se guarda ni exporta nada.
+3. Al aceptar se guardan las asignaciones y se exportan los CSV y PDF de
+   siempre.
+
+Reglas que se mantienen:
+- Las posiciones de las tablas activas son inamovibles (se valida al final).
+- Las tiendas que el calculo pone en lados largos no se mueven.
+- Paises obligados: no se puede llevar una tienda al otro CLA.
+- Sin el check, el calculo es exactamente el de antes.
+
+ARCHIVOS
+========
+Nuevos:
+- modulos/formulario_editor_lados_cortos_domingo.py
+- CAMBIOS_V2_4.txt
+Modificados:
+- modulos/motor_busca_fuera_tabla.py (modo domingo; la preparacion comun
+  del calculo pasa a _preparar_calculo)
+- modulos/formulario_busca_fuera_tabla.py (check y flujo)
+- modulos/version_aplicacion.py (2.4)
+- compilar_calculo_tablas_reparto.bat (version 2.4 y hidden-import nuevo)
+
+PRUEBAS
+=======
+- 40 pruebas automaticas OK.
+- Caso real (CLA 1 con lados largos ocupados, CLA 2 vacio, 358 tiendas/
+  apartes fuera de tabla): sin tocar nada el modo domingo da exactamente el
+  mismo resultado que el calculo normal (104 tiendas en lados cortos);
+  mover, quitar, colocar y repartir funcionan; los lados cortos quedan
+  siempre compactos; no deja exportar con pendientes; al aceptar guarda 358
+  registros sin duplicados y sin pisar posiciones existentes.
+- La ventana del editor no se ha podido abrir en el entorno de pruebas (sin
+  pantalla): revisar la presentacion en el PC.

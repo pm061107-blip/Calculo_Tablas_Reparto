@@ -1,0 +1,67 @@
+CALCULO TABLAS REPARTO - V2.2
+Fecha: 18/10/2026
+
+OBJETIVO
+========
+Ajustar el calculo de cajas (XDOC + Mas unidades) a lo que hace el SILO, segun
+la comparativa con las cajas reservadas por el SILO para el pedido
+ESTAREPP_definitivo.txt (86.449 lotes, 136.404 unidades, 1.468 SKU).
+Estudio completo: proyecto TABLAS DE REPARTO, Estudio_app_vs_silo_20261018.md
+
+CAMBIOS DE CALCULO
+==================
+1. MAS UNIDADES equilibra por CALLE (pasillo + lado, 18 calles).
+   - Primero el pasillo fisico con menos movimientos y, dentro de el, el lado
+     con menos movimientos.
+   - Antes solo equilibraba por pasillo y el desempate por nombre de celda
+     cargaba siempre el lado 01 (3.330 cajas lado 01 frente a 1.161 lado 02).
+2. MAS UNIDADES cuenta tambien las cajas XDOC en ese equilibrio. Para el silo
+   todas son movimientos de la misma ola.
+3. MAS UNIDADES, entre cajas iguales de la misma calle: X menor (mas cerca de
+   cabecera) y despues profundidad 01, como el SILO. Vaciar celdas pasa a ser
+   solo un desempate posterior.
+4. XDOC: el equilibrio de pasillos va antes del desempate fisico. Antes 103 de
+   277 cajas XDOC salian del pasillo 01.
+5. Moda del silo (SKU sin volumetria): solo vale si el tamano mas frecuente se
+   repite en al menos 2 cajas. Antes, si todos los tamanos aparecian una vez,
+   se tomaba la caja de resto mas pequena (1, 2, 3 uds), XDOC la bajaba y
+   obligaba a bajar otra caja. Explicaba las 8 cajas de mas.
+   (Constante MotorCalculoCajasPedido.MODA_SILO_MINIMO_CAJAS = 2)
+
+RESULTADO CON EL PEDIDO REAL
+============================
+                          SILO      V2.1        V2.2
+Cajas                     4.487     4.491       4.483
+Cajas de mas/menos        -         +8 / -4     0 / -4
+Retornos                  1.410     1.407       1.409
+Cajas por calle min-max   231-269   111-429     249-250
+Lado 01 / lado 02         2255/2232 3330/1161   2241/2242
+XDOC en pasillo 01        -         103 de 277  37 de 259
+Las 4 cajas "de menos" son SKU en los que el SILO vacia una caja de resto
+aunque no haga falta; la aplicacion usa el minimo de cajas.
+
+PROTECCION DE DATOS AL COMPILAR
+===============================
+compilar_calculo_tablas_reparto.bat copia antes de borrar dist:
+  dist\Calculo_Tablas_Reparto\_internal\reparto.db
+  dist\Calculo_Tablas_Reparto\_internal\datos_iniciales\Configuracion.xlsx
+a copias_compilacion\AAAAMMDD_HHMMSS y, si la compilacion termina bien, los
+restaura en el EXE nuevo. Si no puede copiarlos, NO borra dist.
+
+ARCHIVOS
+========
+Modificados:
+- modulos/algoritmo_mas_unidades_cajas.py
+- modulos/algoritmo_xdoc_cajas.py
+- modulos/motor_calculo_cajas_pedido.py
+- modulos/version_aplicacion.py (2.2)
+- compilar_calculo_tablas_reparto.bat
+Nuevos:
+- tests/test_algoritmos_cajas_v2_2.py
+- CAMBIOS_V2_2.txt
+
+PRUEBAS
+=======
+- 36 pruebas automaticas OK (30 anteriores + 6 nuevas).
+- Pedido real recalculado en XDOC, XDOC + Mas unidades y XDOC + Limpieza:
+  demanda cubierta completa en los modos con silo.

@@ -1,0 +1,66 @@
+CALCULO_TABLAS_REPARTO - VERSION 2.7
+Volumetria por tipo de caja y pantallas adaptadas a cada PC
+(incluye todo lo de la 2.6)
+=====================================================================
+
+1. VOLUMETRIA: PAIS CON DOS TIPOS DE CAJA = UNA LINEA POR TIPO
+--------------------------------------------------------------
+Antes un pais como ESPAÑA salia en una sola linea con todo su volumen como
+si fuera un solo tipo de caja, y las cajas 300/400 no eran reales.
+
+Ahora, al pulsar CALCULAR PAISES:
+- La aplicacion busca los paises que HOY quedan con mas de un tipo de caja
+  (orden real: TipoCajaInicial -> homologacion -> TipoCajaPais ->
+  TipoCajaTiendaAMayores).
+- Esos paises se calculan con una LINEA POR TIPO DE CAJA, cada una con su
+  volumen y sus cajas. Ejemplo con la base de pruebas:
+     ESPAÑA - 2_Reutilizada_30   9,16 m3   139 cajas 300
+     ESPAÑA - 1_Nueva_30         5,01 m3    76 cajas 300
+     ESPAÑA - 3_Usada_40         1,30 m3    15 cajas 400
+  (el volumen total del pedido es el mismo; solo se reparte por tipo).
+- Las lineas son fijas (naranja, check bloqueados): las de tipo 40 cuentan
+  en CAJA 400 y se descuentan de las cajas 400 reutilizables; las de tipo 30
+  cuentan en CAJA 300.
+- El pais no se toca al CARGAR PAISES 400 EN MAESTRO (se conserva como esta).
+- Paises con tiendas a mayores pero un solo tipo: una linea, en amarillo,
+  "SOLO 300" / "SOLO 400" (la otra opcion crearia dos tipos).
+- Clic en la columna AVISO = detalle de las tiendas de cada tipo.
+
+2. FORMULARIO DE VOLUMETRIA APROVECHA LA PANTALLA
+-------------------------------------------------
+- Cabecera en una sola franja (titulo, reset y cerrar en la misma linea).
+- La tabla de paises ocupa todo el alto que quede libre, sea cual sea la
+  resolucion (antes tenia un alto fijo y sobraba hueco abajo).
+- Filas de una sola linea: el aviso va en su propia columna AVISO.
+- Los textos de resumen se parten en varias lineas si no caben (antes se
+  cortaban por la derecha). Rueda del raton sobre la tabla.
+
+3. TODOS LOS FORMULARIOS SE ADAPTAN A LA RESOLUCION DEL PC
+----------------------------------------------------------
+Muchos formularios pedian un tamano fijo pensado para pantalla grande (por
+ejemplo 1080x900 con minimo 980x820). En un PC con menos resolucion la
+ventana se salia de la pantalla. Ahora, de forma global (ventanas_tk.py),
+cualquier tamano o tamano minimo que pida un formulario se recorta al area
+visible de la pantalla de ESE PC (descontando la barra de tareas), y la
+posicion se corrige para que la ventana no quede fuera.
+Los formularios grandes ya tenian scroll, asi que en pantallas pequenas se
+llega a todo desplazando.
+
+FICHEROS
+--------
+Cambiados:  modulos/calculador_cajas_paises.py
+            modulos/gestor_tipo_caja_pais.py
+            modulos/formulario_volumetria_reutilizacion_paises.py
+            modulos/ventanas_tk.py
+            modulos/version_aplicacion.py  (2.7)
+            compilar_calculo_tablas_reparto.bat  (2.7)
+            CAMBIOS_V2_6.txt (se incluye por si no se pego la 2.6)
+Nuevos:     tests/test_paises_dos_tipos_caja_v2_6.py
+            tests/test_volumetria_pantalla_v2_7.py
+
+PRUEBAS
+-------
+- 59 pruebas unitarias OK.
+- Con la base real: ESPAÑA en 3 lineas, volumen total identico al de antes.
+- Las ventanas no se han podido ver en pantalla real (sin entorno grafico):
+  revisar en el PC.
